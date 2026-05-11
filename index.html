@@ -756,17 +756,17 @@ input::placeholder{color:var(--ink-4)}
     <div class="card-hdr">
       <div>
         <div class="card-title" id="week-card-title">Monday shifts</div>
-        <div class="card-sub">Bar shifts need T1/T2 primary + at least one backup.</div>
+        <div class="card-sub">Live from Square &middot; <span id="schedule-source-stamp" style="color:var(--ink-4)">loading...</span></div>
       </div>
-      <button class="btn btn-sm" onclick="toggleWeekEditor()" id="edit-btn">Edit shifts</button>
+      <a class="btn btn-sm" href="https://app.squareup.com/dashboard/staff/schedule" target="_blank" rel="noopener" style="text-decoration:none">Open in Square &rarr;</a>
     </div>
     <div id="week-view">
       <table class="shift-table">
-        <thead class="shift-thead"><tr><th style="width:90px">Position</th><th style="width:100px">Time</th><th>Assigned · Backup</th><th style="text-align:right;padding-right:18px">Status</th></tr></thead>
+        <thead class="shift-thead"><tr><th style="width:90px">Position</th><th style="width:100px">Time</th><th>Assigned</th><th style="text-align:right;padding-right:18px">Status</th></tr></thead>
         <tbody id="shift-tbody" class="shift-tbody"></tbody>
       </table>
     </div>
-    <div id="week-editor" style="display:none">
+    <div id="week-editor" style="display:none" data-deprecated="true">
       <div class="week-edit-hdr">
         <span style="font-size:12px;font-weight:500">Edit assignments for <span id="editor-day-lbl"></span></span>
         <div style="display:flex;gap:6px">
@@ -1618,14 +1618,16 @@ function renderWeek(){
   var laborPctCls = laborPct<22 ? "ok" : laborPct<30 ? "warn" : "bad";
 
   var rows=shifts.map(function(sh){
-    var p=byId(sh.pid);var pn=p?p.name:"Unassigned";var pt=p?p.tier:"—";
-    var bk=getBackups(sh.pid).map(function(b){return b.name;}).join(", ")||"None";
+    var p=byId(sh.pid);
+    var pn = p ? p.name : (sh.rawName || "Unassigned");
+    var pt = p ? p.tier : "—";
     var st=shiftStatus(sh.pid);if(st.cls!=="st-ok")probs++;
-    var isBar=sh.pos.toLowerCase().includes("bar");
+    var isBar=sh.pos.toLowerCase().indexOf("bar")>-1 || sh.pos.toLowerCase().indexOf("bartender")>-1;
     var flagClopen=p&&conflictNames.indexOf(p.name)>-1;
-    return'<tr><td style="font-weight:500">'+sh.pos+(isBar?'<span class="pill p-green" style="margin-left:6px;font-size:9px">bar</span>':'')+'</td>'+
+    var nameDisp = pn + (p ? " " + tierPill(pt) : ' <span style="font-size:10px;color:var(--ink-4);font-weight:500;margin-left:4px">not in roster</span>');
+    return '<tr><td style="font-weight:500">'+sh.pos+(isBar?'<span class="pill p-green" style="margin-left:6px;font-size:9px">bar</span>':'')+'</td>'+
       '<td class="shift-time">'+sh.time+'</td>'+
-      '<td><div>'+pn+' '+tierPill(pt)+(flagClopen?'<span style="font-size:10px;color:var(--red);font-weight:600;margin-left:6px">⚠ clopening</span>':'')+'</div><div class="shift-back">Backup: '+bk+'</div></td>'+
+      '<td>'+nameDisp+(flagClopen?'<span style="font-size:10px;color:var(--red);font-weight:600;margin-left:6px">⚠ clopening</span>':'')+'</td>'+
       '<td style="text-align:right;padding-right:18px"><span class="'+st.cls+'">'+st.lbl+'</span></td></tr>';
   }).join("");
   document.getElementById("shift-tbody").innerHTML=rows||'<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--ink-4);font-family:\'Geist Mono\',monospace;font-size:11px">No shifts scheduled</td></tr>';
@@ -1648,6 +1650,19 @@ function renderWeek(){
   var k=calcKitchenHealth();
   if(k.gaps.length>0) sumHtml+='<div class="alert al-amber" style="margin-top:8px"><strong>Kitchen:</strong> '+k.gaps.join(" · ")+'</div>';
   document.getElementById("week-summary").innerHTML=sumHtml;
+
+  // Update source stamp under card title
+  var stampEl = document.getElementById("schedule-source-stamp");
+  if(stampEl){
+    if(weekScheduleSource === "square" && weekScheduleLoadedAt){
+      var t = weekScheduleLoadedAt.toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
+      stampEl.textContent = "synced " + t + " NYC";
+    } else if(weekScheduleLoading){
+      stampEl.textContent = "loading...";
+    } else {
+      stampEl.textContent = "fallback view";
+    }
+  }
 }
 function toggleWeekEditor(){
   weekEditing=!weekEditing;
@@ -3210,7 +3225,12 @@ function showTab(t){
   document.querySelectorAll(".tab-pane").forEach(function(el){el.classList.remove("active");});
   document.querySelectorAll(".nav-tab").forEach(function(el,i){el.className="nav-tab"+(["roster","schedule","feedback","team","shifts","breakeven","financial"][i]===t?" active":"");});
   document.getElementById("tab-"+t).classList.add("active");
-  if(t==="schedule"){renderDayBtns();renderWeek();populateCallout();}
+  if(t==="schedule"){
+    // Refresh Square schedule if stale (>5 min)
+    var stale = !weekScheduleLoadedAt || (Date.now() - weekScheduleLoadedAt.getTime()) > 5*60*1000;
+    if(stale && typeof loadWeekScheduleFromSquare === "function") loadWeekScheduleFromSquare();
+    renderDayBtns();renderWeek();populateCallout();
+  }
   if(t==="roster")generateBrief(false);
   if(t==="team"){showTeamTab();if(teamUnlocked)renderRatingsCards();}
   if(t==="shifts")loadShiftReports();
@@ -3984,6 +4004,131 @@ function loadTonightSchedule(){
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════
+// WEEK SCHEDULE — pulled live from Square (replaces in-app schedule entry)
+// Populates WEEK object from Square Labor API for all 7 days of current week.
+// Position label = Square wage.title verbatim. Tier comes from local roster.
+// ═══════════════════════════════════════════════════════
+var weekScheduleLoading = false;
+var weekScheduleLoadedAt = null;
+var weekScheduleSource = "local"; // "square" or "local"
+
+// Match a Square team_member_id → staff record in the tool's roster
+function matchStaffByTeamMember(tmId){
+  if(!tmId) return null;
+  var tmName = teamMemberMap[tmId];
+  if(!tmName) return null;
+  // Exact full-name match first
+  var exact = staff.find(function(s){return s.name.toLowerCase() === tmName.toLowerCase();});
+  if(exact) return exact;
+  // First-name match (handles "Arturo" vs "Arturo Peres Jr")
+  var fn = tmName.split(" ")[0].toLowerCase();
+  var firstMatches = staff.filter(function(s){return s.name.split(" ")[0].toLowerCase() === fn;});
+  if(firstMatches.length === 1) return firstMatches[0];
+  return null;
+}
+
+function loadWeekScheduleFromSquare(){
+  if(weekScheduleLoading) return;
+  weekScheduleLoading = true;
+
+  // Make sure team member names are loaded
+  if(Object.keys(teamMemberMap).length === 0){
+    loadTeamMembers(function(){ fetchWeek(); });
+  } else {
+    fetchWeek();
+  }
+
+  function fetchWeek(){
+    var nowUtc = new Date();
+    var nyc = new Date(nowUtc.toLocaleString("en-US",{timeZone:"America/New_York"}));
+    // Current week Mon → Sun in NYC, expressed as UTC bounds (5am UTC = midnight NYC)
+    var dayOfWeek = nyc.getDay(); // 0=Sun
+    var daysFromMon = (dayOfWeek === 0) ? 6 : (dayOfWeek - 1);
+    var monStart = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), nyc.getDate() - daysFromMon, 5, 0, 0));
+    var sunEnd = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), nyc.getDate() - daysFromMon + 7, 5, 0, 0));
+
+    var allShifts = [];
+    function fetchPage(cursor){
+      var bodyObj = {
+        query: { filter: { location_ids: ["LHSVRCNXBB7E8"], start: { start_at: monStart.toISOString(), end_at: sunEnd.toISOString() } } },
+        limit: 200
+      };
+      if(cursor) bodyObj.cursor = cursor;
+      fetch("/api/proxy", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          url: "https://connect.squareup.com/v2/labor/shifts/search",
+          method: "POST", body: JSON.stringify(bodyObj)
+        })
+      })
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.shifts === undefined){
+          weekScheduleLoading = false;
+          // Fall back silently to local WEEK; nothing to do
+          return;
+        }
+        allShifts = allShifts.concat(d.shifts);
+        if(d.cursor && d.shifts.length === 200){ fetchPage(d.cursor); }
+        else { buildWeek(); }
+      })
+      .catch(function(){ weekScheduleLoading = false; });
+    }
+
+    function buildWeek(){
+      var dayShorts = ["sun","mon","tue","wed","thu","fri","sat"];
+      var newWeek = { mon:[], tue:[], wed:[], thu:[], fri:[], sat:[], sun:[] };
+
+      allShifts.forEach(function(sh){
+        if(!sh.start_at || !sh.end_at) return;
+        // Determine NYC day-of-week for this shift\'s start
+        var startNyc = new Date(new Date(sh.start_at).toLocaleString("en-US",{timeZone:"America/New_York"}));
+        var dayKey = dayShorts[startNyc.getDay()];
+
+        // Position label = Square wage.title verbatim
+        var pos = (sh.wage && sh.wage.title) || "Staff";
+
+        // Time string e.g. "5:00pm-11:00pm"
+        var fmt = function(iso){
+          return new Date(iso).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit",hour12:true}).toLowerCase().replace(" ","");
+        };
+        var time = fmt(sh.start_at) + "-" + fmt(sh.end_at);
+
+        // Match team member to local roster → grab pid for tier badge
+        var p = matchStaffByTeamMember(sh.team_member_id);
+        var pid = p ? p.id : null;
+        // Stash original name even if we couldn\'t match (so display still shows person)
+        var rawName = teamMemberMap[sh.team_member_id] || "";
+
+        newWeek[dayKey].push({
+          pos: pos,
+          time: time,
+          pid: pid,
+          rawName: rawName,
+          square_id: sh.id
+        });
+      });
+
+      // Sort each day\'s shifts by start time (lexicographic on time string is approximate; ok for v1)
+      Object.keys(newWeek).forEach(function(d){
+        newWeek[d].sort(function(a,b){return a.time.localeCompare(b.time);});
+      });
+
+      WEEK = newWeek;
+      weekScheduleSource = "square";
+      weekScheduleLoadedAt = new Date();
+      weekScheduleLoading = false;
+      if(typeof renderWeek === "function" && activeTab === "schedule") renderWeek();
+      if(typeof renderDayBtns === "function" && activeTab === "schedule") renderDayBtns();
+    }
+
+    fetchPage(null);
+  }
+}
+
+
 
 
 
@@ -4995,6 +5140,7 @@ async function init(){
   fhLoadInputs();
   loadYesterdayLabor();
   loadTonightSchedule();
+  loadWeekScheduleFromSquare();
   renderRoster();
   renderDayBtns();
   renderWeek();
