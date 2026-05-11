@@ -3845,6 +3845,8 @@ function loadYesterdayLabor(){
 var tonightScheduleData = null; // {shifts:[], anomalies:[], totalCount, jobBreakdown}
 var tonightScheduleLoading = false;
 var teamMemberMap = {}; // id → name, populated from /v2/team-members/search
+var jobsMap = {}; // id → title, populated from /v2/team/jobs (Bartender, Cook, etc.)
+var jobsLoaded = false;
 
 function loadTeamMembers(onDone){
   fetch("/api/proxy", {
@@ -3865,43 +3867,70 @@ function loadTeamMembers(onDone){
   .catch(function(){ if(onDone) onDone(); });
 }
 
+function loadJobs(onDone){
+  if(jobsLoaded){ if(onDone) onDone(); return; }
+  fetch("/api/proxy", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      url: "https://connect.squareup.com/v2/team/jobs",
+      method: "GET", body: ""
+    })
+  })
+  .then(function(r){return r.json();})
+  .then(function(d){
+    (d.jobs || []).forEach(function(j){ jobsMap[j.id] = j.title; });
+    jobsLoaded = true;
+    if(onDone) onDone();
+  })
+  .catch(function(){ if(onDone) onDone(); });
+}
+
 function loadTonightSchedule(){
   if(tonightScheduleLoading) return;
   tonightScheduleLoading = true;
 
-  // Make sure team member names are loaded so we can name names in anomalies
-  if(Object.keys(teamMemberMap).length === 0){
-    loadTeamMembers(function(){ fetchTodaysShifts(); });
-  } else {
-    fetchTodaysShifts();
+  function ensureDeps(cb){
+    var pending = 2;
+    function done(){ pending--; if(pending===0) cb(); }
+    if(Object.keys(teamMemberMap).length === 0) loadTeamMembers(done); else done();
+    if(!jobsLoaded) loadJobs(done); else done();
   }
+
+  ensureDeps(fetchTodaysShifts);
 
   function fetchTodaysShifts(){
     var nowUtc = new Date();
     var nyc = new Date(nowUtc.toLocaleString("en-US",{timeZone:"America/New_York"}));
-    // Today in NYC: midnight today → midnight tomorrow (in UTC: 5am today → 5am tomorrow)
-    var startIso = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), nyc.getDate(), 5, 0, 0)).toISOString();
-    var endIso = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), nyc.getDate()+1, 5, 0, 0)).toISOString();
+    var dateStr = nyc.getFullYear() + "-" + String(nyc.getMonth()+1).padStart(2,"0") + "-" + String(nyc.getDate()).padStart(2,"0");
 
     var allShifts = [];
     function fetchPage(cursor){
       var bodyObj = {
-        query: { filter: { location_ids: ["LHSVRCNXBB7E8"], start: { start_at: startIso, end_at: endIso } } },
-        limit: 200
+        limit: 200,
+        query: {
+          filter: {
+            location_ids: ["LHSVRCNXBB7E8"],
+            workday: {
+              date_range: { start_date: dateStr, end_date: dateStr },
+              default_timezone: "America/New_York",
+              match_scheduled_shifts_by: "START_AT"
+            }
+          }
+        }
       };
       if(cursor) bodyObj.cursor = cursor;
       fetch("/api/proxy", {
         method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
-          url: "https://connect.squareup.com/v2/labor/shifts/search",
+          url: "https://connect.squareup.com/v2/labor/scheduled-shifts/search",
           method: "POST", body: JSON.stringify(bodyObj)
         })
       })
       .then(function(r){return r.json();})
       .then(function(d){
-        if(d.shifts === undefined){ tonightScheduleLoading = false; tonightScheduleData = null; return; }
-        allShifts = allShifts.concat(d.shifts);
-        if(d.cursor && d.shifts.length === 200){ fetchPage(d.cursor); }
+        if(d.scheduled_shifts === undefined){ tonightScheduleLoading = false; tonightScheduleData = null; return; }
+        allShifts = allShifts.concat(d.scheduled_shifts);
+        if(d.cursor && d.scheduled_shifts.length > 0){ fetchPage(d.cursor); }
         else { analyzeSchedule(); }
       })
       .catch(function(){ tonightScheduleLoading = false; tonightScheduleData = null; });
@@ -3909,41 +3938,38 @@ function loadTonightSchedule(){
 
     function analyzeSchedule(){
       var anomalies = [];
-      var jobBreakdown = {}; // jobTitle → count
+      var jobBreakdown = {};
       var shiftSummary = [];
 
-      // Day-of-week context for "this is a slow day" type reasoning
       var dayNamesFull = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
       var todayName = dayNamesFull[nyc.getDay()];
       var benchmark = BE_NIGHTS.find(function(n){return n.day === todayName;});
       var avgSales = benchmark ? benchmark.avgSales : 0;
-      // Slow day = below median (median of avgSales across BE_NIGHTS is ~$2,500)
       var isSlowDay = avgSales > 0 && avgSales < 2500;
 
       allShifts.forEach(function(sh){
-        if(!sh.start_at || !sh.end_at) return;
-        var startMs = new Date(sh.start_at).getTime();
-        var endMs = new Date(sh.end_at).getTime();
+        var det = sh.published_shift_details || sh.draft_shift_details;
+        if(!det || det.is_deleted) return;
+        if(!det.start_at || !det.end_at) return;
+
+        var startMs = new Date(det.start_at).getTime();
+        var endMs = new Date(det.end_at).getTime();
         var grossHours = (endMs - startMs) / (1000 * 60 * 60);
-        var jobTitle = (sh.wage && sh.wage.title) || "Staff";
-        var name = teamMemberMap[sh.team_member_id] || jobTitle;
-        var startTime = new Date(sh.start_at).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
-        var endTime = new Date(sh.end_at).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
+        var jobTitle = jobsMap[det.job_id] || "Staff";
+        var name = teamMemberMap[det.team_member_id] || jobTitle;
+        var startTime = new Date(det.start_at).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
+        var endTime = new Date(det.end_at).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
 
-        // Track job breakdown
         jobBreakdown[jobTitle] = (jobBreakdown[jobTitle] || 0) + 1;
-
         shiftSummary.push({ name: name, job: jobTitle, hours: grossHours, window: startTime + "–" + endTime });
 
-        // Flag 1: very short scheduled shift (<3h) — almost always a schedule mistake
+        // Anomaly: very short scheduled shift
         if(grossHours > 0 && grossHours < 3){
           anomalies.push({
             severity: "bad", type: "short-schedule",
             message: name + " (" + jobTitle + ") scheduled for only " + (Math.round(grossHours * 10) / 10) + "h (" + startTime + "–" + endTime + "). That doesn\'t cover a real shift — verify this isn\'t a mistake."
           });
-        }
-        // Flag 2: very long scheduled shift (>11h) — usually a typo or forgotten end-time
-        else if(grossHours > 11){
+        } else if(grossHours > 11){
           anomalies.push({
             severity: "bad", type: "long-schedule",
             message: name + " (" + jobTitle + ") scheduled for " + Math.round(grossHours) + "h (" + startTime + "–" + endTime + "). Looks like an end-time error — check the schedule."
@@ -3951,9 +3977,7 @@ function loadTonightSchedule(){
         }
       });
 
-      // Flag 3: stacked support roles on slow weekday services
-      // Weekends (Sat/Sun) run lunch + dinner — stacking is expected and necessary.
-      // Only flag stacking on slow weekdays (Mon-Fri) where it almost always means over-staffing.
+      // Stacked support roles on slow weekdays
       var isWeekend = todayName === "Saturday" || todayName === "Sunday";
       var stackableRoles = ["Porter","Dishwasher","Busser"];
       stackableRoles.forEach(function(role){
@@ -3966,16 +3990,22 @@ function loadTonightSchedule(){
         }
       });
 
-      // Flag 4: too many cooks/leads vs day's avg revenue (rough labor-band check on the schedule)
-      // Sum hours × rough rate to estimate scheduled labor cost, compare to typical % of revenue
+      // Aggregate labor projection — use default rate since scheduled shifts may not have wage info
       var estLabor = 0;
       allShifts.forEach(function(sh){
-        if(!sh.start_at || !sh.end_at) return;
-        var hrs = (new Date(sh.end_at).getTime() - new Date(sh.start_at).getTime()) / (1000*60*60);
-        var rateCents = (sh.wage && sh.wage.hourly_rate && sh.wage.hourly_rate.amount) || 2500; // default $25/h
-        estLabor += hrs * (rateCents / 100);
+        var det = sh.published_shift_details || sh.draft_shift_details;
+        if(!det || det.is_deleted) return;
+        if(!det.start_at || !det.end_at) return;
+        var hrs = (new Date(det.end_at).getTime() - new Date(det.start_at).getTime()) / (1000*60*60);
+        // Default rate by job type (rough estimates)
+        var title = (jobsMap[det.job_id] || "").toLowerCase();
+        var rate = 22;
+        if(title.indexOf("manager") > -1 || title.indexOf("lead") > -1 || title.indexOf("chef") > -1) rate = 30;
+        else if(title.indexOf("bartender") > -1) rate = 26;
+        else if(title.indexOf("server") > -1) rate = 24;
+        else if(title.indexOf("porter") > -1 || title.indexOf("dish") > -1) rate = 20;
+        estLabor += hrs * rate;
       });
-      // Apply payroll tax + Tanner's day prorate
       var nyc2 = new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"}));
       var daysInMonth = new Date(nyc2.getFullYear(), nyc2.getMonth()+1, 0).getDate();
       var tannerDay = (typeof FH_TANNER_SALARY_MONTHLY !== "undefined" ? FH_TANNER_SALARY_MONTHLY : 7084) / daysInMonth;
@@ -3993,7 +4023,7 @@ function loadTonightSchedule(){
       tonightScheduleData = {
         shifts: shiftSummary,
         anomalies: anomalies,
-        totalCount: allShifts.length,
+        totalCount: shiftSummary.length,
         jobBreakdown: jobBreakdown,
         projectedLaborPct: projectedLaborPct,
         typicalLaborPct: typicalPct,
@@ -4033,45 +4063,58 @@ function loadWeekScheduleFromSquare(){
   if(weekScheduleLoading) return;
   weekScheduleLoading = true;
 
-  // Make sure team member names are loaded
-  if(Object.keys(teamMemberMap).length === 0){
-    loadTeamMembers(function(){ fetchWeek(); });
-  } else {
-    fetchWeek();
+  // Make sure team member names AND job titles are loaded
+  function ensureDeps(cb){
+    var pending = 2;
+    function done(){ pending--; if(pending===0) cb(); }
+    if(Object.keys(teamMemberMap).length === 0) loadTeamMembers(done); else done();
+    if(!jobsLoaded) loadJobs(done); else done();
   }
+
+  ensureDeps(fetchWeek);
 
   function fetchWeek(){
     var nowUtc = new Date();
     var nyc = new Date(nowUtc.toLocaleString("en-US",{timeZone:"America/New_York"}));
-    // Current week Mon → Sun in NYC, expressed as UTC bounds (5am UTC = midnight NYC)
+    // Current week Mon → Sun
     var dayOfWeek = nyc.getDay(); // 0=Sun
     var daysFromMon = (dayOfWeek === 0) ? 6 : (dayOfWeek - 1);
-    var monStart = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), nyc.getDate() - daysFromMon, 5, 0, 0));
-    var sunEnd = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), nyc.getDate() - daysFromMon + 7, 5, 0, 0));
+    var monNyc = new Date(nyc.getFullYear(), nyc.getMonth(), nyc.getDate() - daysFromMon);
+    var sunNyc = new Date(nyc.getFullYear(), nyc.getMonth(), nyc.getDate() - daysFromMon + 6);
+    var startDate = monNyc.getFullYear() + "-" + String(monNyc.getMonth()+1).padStart(2,"0") + "-" + String(monNyc.getDate()).padStart(2,"0");
+    var endDate = sunNyc.getFullYear() + "-" + String(sunNyc.getMonth()+1).padStart(2,"0") + "-" + String(sunNyc.getDate()).padStart(2,"0");
 
     var allShifts = [];
     function fetchPage(cursor){
       var bodyObj = {
-        query: { filter: { location_ids: ["LHSVRCNXBB7E8"], start: { start_at: monStart.toISOString(), end_at: sunEnd.toISOString() } } },
-        limit: 200
+        limit: 200,
+        query: {
+          filter: {
+            location_ids: ["LHSVRCNXBB7E8"],
+            workday: {
+              date_range: { start_date: startDate, end_date: endDate },
+              default_timezone: "America/New_York",
+              match_scheduled_shifts_by: "START_AT"
+            }
+          }
+        }
       };
       if(cursor) bodyObj.cursor = cursor;
       fetch("/api/proxy", {
         method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
-          url: "https://connect.squareup.com/v2/labor/shifts/search",
+          url: "https://connect.squareup.com/v2/labor/scheduled-shifts/search",
           method: "POST", body: JSON.stringify(bodyObj)
         })
       })
       .then(function(r){return r.json();})
       .then(function(d){
-        if(d.shifts === undefined){
+        if(d.scheduled_shifts === undefined){
           weekScheduleLoading = false;
-          // Fall back silently to local WEEK; nothing to do
           return;
         }
-        allShifts = allShifts.concat(d.shifts);
-        if(d.cursor && d.shifts.length === 200){ fetchPage(d.cursor); }
+        allShifts = allShifts.concat(d.scheduled_shifts);
+        if(d.cursor && d.scheduled_shifts.length > 0){ fetchPage(d.cursor); }
         else { buildWeek(); }
       })
       .catch(function(){ weekScheduleLoading = false; });
@@ -4082,38 +4125,45 @@ function loadWeekScheduleFromSquare(){
       var newWeek = { mon:[], tue:[], wed:[], thu:[], fri:[], sat:[], sun:[] };
 
       allShifts.forEach(function(sh){
-        if(!sh.start_at || !sh.end_at) return;
-        // Determine NYC day-of-week for this shift\'s start
-        var startNyc = new Date(new Date(sh.start_at).toLocaleString("en-US",{timeZone:"America/New_York"}));
+        // Prefer published_shift_details (source of truth) — fall back to draft if not yet published
+        var det = sh.published_shift_details || sh.draft_shift_details;
+        if(!det || det.is_deleted) return;
+        if(!det.start_at || !det.end_at) return;
+
+        // Determine NYC day-of-week for the shift\'s start
+        var startNyc = new Date(new Date(det.start_at).toLocaleString("en-US",{timeZone:"America/New_York"}));
         var dayKey = dayShorts[startNyc.getDay()];
 
-        // Position label = Square wage.title verbatim
-        var pos = (sh.wage && sh.wage.title) || "Staff";
+        // Position label = looked-up job title (Cook, Bartender, etc.)
+        var pos = jobsMap[det.job_id] || "Staff";
 
         // Time string e.g. "5:00pm-11:00pm"
         var fmt = function(iso){
           return new Date(iso).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit",hour12:true}).toLowerCase().replace(" ","");
         };
-        var time = fmt(sh.start_at) + "-" + fmt(sh.end_at);
+        var time = fmt(det.start_at) + "-" + fmt(det.end_at);
 
         // Match team member to local roster → grab pid for tier badge
-        var p = matchStaffByTeamMember(sh.team_member_id);
+        var p = matchStaffByTeamMember(det.team_member_id);
         var pid = p ? p.id : null;
-        // Stash original name even if we couldn\'t match (so display still shows person)
-        var rawName = teamMemberMap[sh.team_member_id] || "";
+        var rawName = teamMemberMap[det.team_member_id] || "";
 
         newWeek[dayKey].push({
           pos: pos,
           time: time,
           pid: pid,
           rawName: rawName,
-          square_id: sh.id
+          square_id: sh.id,
+          start_at: det.start_at,
+          end_at: det.end_at
         });
       });
 
-      // Sort each day\'s shifts by start time (lexicographic on time string is approximate; ok for v1)
+      // Sort each day\'s shifts by start time (use real timestamps, not string compare)
       Object.keys(newWeek).forEach(function(d){
-        newWeek[d].sort(function(a,b){return a.time.localeCompare(b.time);});
+        newWeek[d].sort(function(a,b){
+          return new Date(a.start_at).getTime() - new Date(b.start_at).getTime();
+        });
       });
 
       WEEK = newWeek;
