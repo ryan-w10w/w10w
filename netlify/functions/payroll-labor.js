@@ -1,22 +1,31 @@
 // /api/payroll-labor?start=YYYY-MM-DD&end=YYYY-MM-DD
-// Returns Square Labor shifts for the date range, with team member details (name, job titles).
-// All times are interpreted in America/New_York. Each shift is returned with hours computed.
+// TOAST version. Returns the SAME JSON shape the previous Square version returned, so
+// payroll.html needs no logic change:
+//   { shifts: [{ shift_id, team_member_id, name, job_title, role, tip_multiplier,
+//                start_at, end_at, local_date, hours, declared_cash_tips_cents, open }],
+//     count }
+//
+// Source: Toast Labor API
+//   GET /labor/v1/timeEntries?startDate&endDate   (actual clock-in/out, paid hours)
+//   GET /labor/v1/employees                       (guid -> name)
+//   GET /labor/v1/jobs                            (guid -> title)
+//
+// Env vars required:
+//   TOAST_CLIENT_ID, TOAST_CLIENT_SECRET   (Standard API access credentials)
+//   TOAST_RESTAURANT_GUID                  (location GUID, sent as Toast-Restaurant-External-ID)
+//   TOAST_HOSTNAME                         (optional, defaults to production)
 
-const SQUARE_BASE = 'https://connect.squareup.com';
-const LOCATION_ID = process.env.SQUARE_LOCATION_ID || 'LHSVRCNXBB7E8';
-const TZ_OFFSET_HOURS = -4; // EDT. Adjust to -5 for EST. Square stores UTC; we compare on local-day basis.
+const TOAST_HOST = process.env.TOAST_HOSTNAME || 'https://ws-api.toasttab.com';
+const RID = process.env.TOAST_RESTAURANT_GUID;
 
+// Job title -> internal role bucket. Keys MUST match the job titles as named in Toast.
+// Edit here as Toast jobs evolve. Anything unmatched is treated as non_tipped (BOH/ops).
 const ROLE_MAP = {
-  // Job title -> internal role bucket. Edit as Square jobs evolve.
-  // Tipped FOH (full share)
   'Server': 'server',
   'Bartender': 'bartender',
   'Floor Lead': 'floor_lead',
-  // Partial share
   'Host': 'host',
-  // Zero share
   'Training': 'training',
-  // Non-tipped (BOH, ops). Anything not matched here is treated as non_tipped by default.
   'Line Cook': 'non_tipped',
   'Lead Line Cook': 'non_tipped',
   'Porter': 'non_tipped',
@@ -34,83 +43,98 @@ const TIP_MULTIPLIER = {
   non_tipped: 0
 };
 
-function squareHeaders() {
+// ---- Toast auth (cached in the warm container; tokens last ~24h) ----
+let _tok = { value: null, exp: 0 };
+async function toastToken() {
+  if (_tok.value && Date.now() < _tok.exp - 60000) return _tok.value;
+  const r = await fetch(`${TOAST_HOST}/authentication/v1/authentication/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      clientId: process.env.TOAST_CLIENT_ID,
+      clientSecret: process.env.TOAST_CLIENT_SECRET,
+      userAccessType: 'TOAST_MACHINE_CLIENT'
+    })
+  });
+  if (!r.ok) throw new Error(`Toast auth ${r.status}: ${await r.text()}`);
+  const t = (await r.json()).token || {};
+  _tok = { value: t.accessToken, exp: Date.now() + (t.expiresIn ? t.expiresIn * 1000 : 3600000) };
+  return _tok.value;
+}
+function toastHeaders(token) {
   return {
-    'Square-Version': '2024-08-21',
-    'Authorization': `Bearer ${process.env.SQUARE_TOKEN}`,
+    'Authorization': `Bearer ${token}`,
+    'Toast-Restaurant-External-ID': RID,
     'Content-Type': 'application/json'
   };
 }
 
-async function fetchAllShifts(startISO, endISO) {
-  const shifts = [];
-  let cursor;
-  do {
-    const body = {
-      query: {
-        filter: {
-          location_ids: [LOCATION_ID],
-          start: { start_at: startISO, end_at: endISO }
-        }
-      },
-      limit: 200
-    };
-    if (cursor) body.cursor = cursor;
-
-    const r = await fetch(`${SQUARE_BASE}/v2/labor/shifts/search`, {
-      method: 'POST',
-      headers: squareHeaders(),
-      body: JSON.stringify(body)
-    });
-    if (!r.ok) throw new Error(`Labor API ${r.status}: ${await r.text()}`);
-    const data = await r.json();
-    if (data.shifts) shifts.push(...data.shifts);
-    cursor = data.cursor;
-  } while (cursor);
-  return shifts;
+// DST-aware America/New_York helpers
+function nyToUTCISO(dateStr, h, m, s) {
+  const pad = n => String(n).padStart(2, '0');
+  const timeStr = `${pad(h)}:${pad(m)}:${pad(s)}`;
+  for (const off of ['-04:00', '-05:00']) {
+    const cand = new Date(`${dateStr}T${timeStr}${off}`);
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(cand);
+    if (fmt === dateStr) return cand.toISOString();
+  }
+  return new Date(`${dateStr}T${timeStr}-04:00`).toISOString();
+}
+function localDateOf(iso) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date(iso));
 }
 
-async function fetchTeamMembers(ids) {
-  if (!ids.length) return {};
-  const r = await fetch(`${SQUARE_BASE}/v2/team-members/search`, {
-    method: 'POST',
-    headers: squareHeaders(),
-    body: JSON.stringify({ query: { filter: { location_ids: [LOCATION_ID] } }, limit: 200 })
-  });
-  if (!r.ok) throw new Error(`Team members API ${r.status}: ${await r.text()}`);
-  const data = await r.json();
+// Generic paginated GET that follows Toast-Next-Page-Token. Toast labor list endpoints
+// return a bare JSON array and a Toast-Next-Page-Token response header when more pages exist.
+async function fetchAllPages(baseUrl, token) {
+  const out = [];
+  let pageToken;
+  let guard = 0;
+  do {
+    const u = new URL(baseUrl);
+    if (pageToken) u.searchParams.set('pageToken', pageToken);
+    const r = await fetch(u.toString(), { headers: toastHeaders(token) });
+    if (!r.ok) throw new Error(`${u.pathname} ${r.status}: ${await r.text()}`);
+    const batch = await r.json();
+    if (Array.isArray(batch)) out.push(...batch);
+    pageToken = r.headers.get('toast-next-page-token') || null;
+    guard += 1;
+  } while (pageToken && guard < 50);
+  return out;
+}
+
+async function fetchEmployees(token) {
+  const arr = await fetchAllPages(`${TOAST_HOST}/labor/v1/employees`, token);
   const map = {};
-  (data.team_members || []).forEach(tm => {
-    map[tm.id] = {
-      id: tm.id,
-      name: [tm.given_name, tm.family_name].filter(Boolean).join(' ').trim() || 'Unknown',
-      jobs: (tm.wage_setting?.job_assignments || []).map(j => j.job_title)
-    };
+  arr.forEach(e => {
+    const name = (e.chosenName && e.chosenName.trim())
+      || [e.firstName, e.lastName].filter(Boolean).join(' ').trim()
+      || 'Unknown';
+    map[e.guid] = name;
   });
   return map;
 }
 
-async function fetchJobTitles() {
-  // Map job_id -> job_title for resolving shift.job_id
-  const jobs = {};
-  let cursor;
-  do {
-    const url = new URL(`${SQUARE_BASE}/v2/labor/jobs`);
-    if (cursor) url.searchParams.set('cursor', cursor);
-    const r = await fetch(url.toString(), { headers: squareHeaders() });
-    if (!r.ok) break;
-    const data = await r.json();
-    (data.jobs || []).forEach(j => { jobs[j.id] = j.title; });
-    cursor = data.cursor;
-  } while (cursor);
-  return jobs;
+async function fetchJobs(token) {
+  const arr = await fetchAllPages(`${TOAST_HOST}/labor/v1/jobs`, token);
+  const map = {};
+  arr.forEach(j => { map[j.guid] = j.title; });
+  return map;
 }
 
-function localDateOf(isoString) {
-  // Returns YYYY-MM-DD for the local (NY) date the timestamp falls into.
-  const d = new Date(isoString);
-  const local = new Date(d.getTime() + TZ_OFFSET_HOURS * 3600 * 1000);
-  return local.toISOString().slice(0, 10);
+async function fetchTimeEntries(token, startISO, endISO) {
+  const base = `${TOAST_HOST}/labor/v1/timeEntries?startDate=${encodeURIComponent(startISO)}&endDate=${encodeURIComponent(endISO)}`;
+  return fetchAllPages(base, token);
+}
+
+// PT#H#M#S -> hours, used only for the unpaid-break fallback path
+function isoDur(iso) {
+  if (!iso) return 0;
+  const m = String(iso).match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!m) return 0;
+  return (+(m[1] || 0)) + (+(m[2] || 0)) / 60 + (+(m[3] || 0)) / 3600;
 }
 
 exports.handler = async (event) => {
@@ -119,49 +143,59 @@ exports.handler = async (event) => {
     if (!start || !end) {
       return { statusCode: 400, body: JSON.stringify({ error: 'start and end (YYYY-MM-DD) required' }) };
     }
-    // Build wide UTC window so shifts that started/ended just outside local boundaries are still included.
-    const startISO = new Date(`${start}T00:00:00${TZ_OFFSET_HOURS < 0 ? '-' : '+'}0${Math.abs(TZ_OFFSET_HOURS)}:00`).toISOString();
-    const endExclusive = new Date(`${end}T23:59:59${TZ_OFFSET_HOURS < 0 ? '-' : '+'}0${Math.abs(TZ_OFFSET_HOURS)}:00`).toISOString();
+    if (!RID) {
+      return { statusCode: 500, body: JSON.stringify({ error: 'TOAST_RESTAURANT_GUID not set' }) };
+    }
 
-    const [shifts, jobs] = await Promise.all([
-      fetchAllShifts(startISO, endExclusive),
-      fetchJobTitles()
+    const token = await toastToken();
+    const startISO = nyToUTCISO(start, 0, 0, 0);
+    const endISO = nyToUTCISO(end, 23, 59, 59);
+
+    const [employees, jobs, entries] = await Promise.all([
+      fetchEmployees(token),
+      fetchJobs(token),
+      fetchTimeEntries(token, startISO, endISO)
     ]);
 
-    const memberIds = [...new Set(shifts.map(s => s.team_member_id || s.employee_id).filter(Boolean))];
-    const members = await fetchTeamMembers(memberIds);
+    const enriched = entries
+      .filter(te => !te.deleted)
+      .map(te => {
+        const memberId = te.employeeReference?.guid || null;
+        const jobTitle = jobs[te.jobReference?.guid] || 'Unknown';
+        const role = ROLE_MAP[jobTitle] || 'non_tipped';
+        const open = !te.outDate;
 
-    const enriched = shifts.map(s => {
-      const startedAt = s.start_at;
-      const endedAt = s.end_at;
-      const memberId = s.team_member_id || s.employee_id;
-      // Square sets the per-shift job title directly at s.wage.title. Prefer that over the
-      // team member's primary job, which is what causes single-role display when a person
-      // worked multiple roles in the week (e.g. a Server who covered a Training shift).
-      const jobTitle = s.wage?.title
-        || jobs[s.wage?.job_id]
-        || jobs[s.job_id]
-        || (members[memberId]?.jobs?.[0])
-        || 'Unknown';
-      const role = ROLE_MAP[jobTitle] || 'non_tipped';
-      const hours = endedAt
-        ? (new Date(endedAt) - new Date(startedAt)) / 3600000
-        : null;
-      return {
-        shift_id: s.id,
-        team_member_id: memberId,
-        name: members[memberId]?.name || 'Unknown',
-        job_title: jobTitle,
-        role,
-        tip_multiplier: TIP_MULTIPLIER[role] ?? 0,
-        start_at: startedAt,
-        end_at: endedAt,
-        local_date: startedAt ? localDateOf(startedAt) : null,
-        hours: hours != null ? Math.round(hours * 100) / 100 : null,
-        declared_cash_tips_cents: s.declared_cash_tip_money?.amount || 0,
-        open: !endedAt
-      };
-    });
+        // Worked hours: Toast's regularHours + overtimeHours is the authoritative paid total
+        // (already net of unpaid breaks). Fall back to gross clock time minus unpaid breaks
+        // only if Toast reports zero (rare). Open shifts have no hours yet, matching the old behavior.
+        let hours = null;
+        if (!open) {
+          const paid = (te.regularHours || 0) + (te.overtimeHours || 0);
+          if (paid > 0) {
+            hours = paid;
+          } else {
+            let gross = (new Date(te.outDate) - new Date(te.inDate)) / 3600000;
+            (te.breaks || []).forEach(b => { if (b.paid === false) gross -= isoDur(b.expectedDuration); });
+            hours = Math.max(0, gross);
+          }
+          hours = Math.round(hours * 100) / 100;
+        }
+
+        return {
+          shift_id: te.guid,
+          team_member_id: memberId,
+          name: employees[memberId] || 'Unknown',
+          job_title: jobTitle,
+          role,
+          tip_multiplier: TIP_MULTIPLIER[role] ?? 0,
+          start_at: te.inDate || null,
+          end_at: te.outDate || null,
+          local_date: te.inDate ? localDateOf(te.inDate) : null,
+          hours,
+          declared_cash_tips_cents: Math.round((te.declaredCashTips || 0) * 100),
+          open
+        };
+      });
 
     return {
       statusCode: 200,
