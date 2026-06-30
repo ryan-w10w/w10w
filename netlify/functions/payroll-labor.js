@@ -112,9 +112,9 @@ async function fetchEmployees(token) {
   const arr = await fetchAllPages(`${TOAST_HOST}/labor/v1/employees`, token);
   const map = {};
   arr.forEach(e => {
-    const name = (e.chosenName && e.chosenName.trim())
-      || [e.firstName, e.lastName].filter(Boolean).join(' ').trim()
-      || 'Unknown';
+    const first = (e.chosenName && e.chosenName.trim()) || (e.firstName && e.firstName.trim()) || '';
+    const last = (e.lastName && e.lastName.trim()) || '';
+    const name = [first, last].filter(Boolean).join(' ') || 'Unknown';
     map[e.guid] = name;
   });
   return map;
