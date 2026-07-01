@@ -115,7 +115,11 @@ async function fetchEmployees(token) {
     const first = (e.chosenName && e.chosenName.trim()) || (e.firstName && e.firstName.trim()) || '';
     const last = (e.lastName && e.lastName.trim()) || '';
     const name = [first, last].filter(Boolean).join(' ') || 'Unknown';
-    map[e.guid] = name;
+    map[e.guid] = {
+      name,
+      external_id: e.externalEmployeeId || null,
+      email: (e.email && e.email.trim()) || null
+    };
   });
   return map;
 }
@@ -187,7 +191,9 @@ exports.handler = async (event) => {
         return {
           shift_id: te.guid,
           team_member_id: memberId,
-          name: employees[memberId] || 'Unknown',
+          name: employees[memberId]?.name || 'Unknown',
+          external_id: employees[memberId]?.external_id || null,
+          email: employees[memberId]?.email || null,
           job_title: jobTitle,
           role,
           tip_multiplier: TIP_MULTIPLIER[role] ?? 0,
