@@ -226,7 +226,7 @@
     margin-bottom: 24px;
   }
 
-  /* Tip Entry list (Square Payroll workflow) */
+  /* Tip Entry list (Toast Payroll workflow) */
   .tip-entry-help {
     font-size: 13px; color: var(--muted);
     margin: 0 0 24px 0;
@@ -385,9 +385,9 @@
     </section>
 
     <section>
-      <h2>Square Payroll Entry</h2>
+      <h2>Toast Payroll Entry</h2>
       <p class="tip-entry-help">
-        Click each total to copy and mark as entered. Sorted alphabetically to match Square Payroll. Only tipped employees shown.
+        Download the CSV below and import it into the Toast Payroll run (the Toast Employee ID column is the match key). Click-to-copy totals remain for manual entry or spot checks. Only tipped employees shown.
       </p>
       <div id="tipEntryList"></div>
       <div class="tip-actions">
@@ -551,8 +551,12 @@
     shifts.forEach(s => {
       if (s.hours == null) return;
       if (!employeeTotals[s.name]) {
-        employeeTotals[s.name] = { team_member_id: s.team_member_id, hours: 0, weighted_hours: 0, scheduled_hours: 0, variance: 0, card_tips: 0, cash_tips: 0, job_title_hours: {} };
+        // external_id = Toast's externalEmployeeId, the stable employee
+        // number Toast Payroll matches imports on. email is the backup key.
+        employeeTotals[s.name] = { team_member_id: s.team_member_id, external_id: s.external_id || null, email: s.email || null, hours: 0, weighted_hours: 0, scheduled_hours: 0, variance: 0, card_tips: 0, cash_tips: 0, job_title_hours: {} };
       }
+      if (!employeeTotals[s.name].external_id && s.external_id) employeeTotals[s.name].external_id = s.external_id;
+      if (!employeeTotals[s.name].email && s.email) employeeTotals[s.name].email = s.email;
       employeeTotals[s.name].hours += s.hours;
       employeeTotals[s.name].weighted_hours += s.hours * (s.tip_multiplier || 0);
       const title = s.job_title || 'Unknown';
@@ -910,13 +914,20 @@
   }
 
   function buildCSV(payroll) {
+    // Import file for the Toast Payroll run. "Toast Employee ID" is
+    // externalEmployeeId from Toast Labor, the stable employee number
+    // payroll matches on; email is the backup key. Paycheck Tips is the
+    // card pool share (paid via payroll); Cash Tips already went home
+    // and is listed for the record / declared-tips entry.
     const sorted = Object.entries(payroll.employeeTotals)
       .filter(([, e]) => e.card_tips > 0 || e.cash_tips > 0 || e.hours > 0)
       .sort((a, b) => a[0].localeCompare(b[0]));
-    const lines = ['Employee,Role,Hours,Card Tips,Cash Tips,Total Tips'];
+    const lines = ['Employee,Toast Employee ID,Email,Role,Hours,Paycheck Tips (Card),Cash Tips,Total Tips'];
     sorted.forEach(([name, e]) => {
       lines.push([
         `"${name}"`,
+        `"${e.external_id || ''}"`,
+        `"${e.email || ''}"`,
         `"${e.role_display || ''}"`,
         e.hours.toFixed(2),
         e.card_tips.toFixed(2),
