@@ -180,7 +180,11 @@ async function fetchOrders(token, startISO, endISO) {
 
 const cents = x => Math.round((x || 0) * 100);
 
+const { requireKey } = require('./_auth');
+
 exports.handler = async (event) => {
+  const denied = requireKey(event);
+  if (denied) return denied;
   try {
     const { start, end } = event.queryStringParameters || {};
     if (!start || !end) {

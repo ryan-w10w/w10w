@@ -473,13 +473,32 @@
   // ============================================================
   // FETCH
   // ============================================================
+  // Shared-secret API key (enforced server-side once W10W_API_KEY is set in Netlify).
+  let apiKeyPrompted = false;
+  function apiKey() {
+    try { return localStorage.getItem('w10w-api-key') || ''; } catch (e) { return ''; }
+  }
+  function promptApiKey() {
+    const k = window.prompt('API key required (ask ryan):');
+    if (k) { try { localStorage.setItem('w10w-api-key', k.trim()); } catch (e) {} }
+    return apiKey();
+  }
+
   async function fetchOne(url, label) {
     // Resilient single-fetch: retries once on 5xx/network blips,
     // detects 401/403 with specific message, returns __error on failure.
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const r = await fetch(url);
-        if (r.status === 401 || r.status === 403) {
+        let r = await fetch(url, { headers: { 'x-w10w-key': apiKey() || '' } });
+        if (r.status === 401) {
+          // Server-side shared secret missing/wrong: prompt once, retry once.
+          if (!apiKeyPrompted) { apiKeyPrompted = true; promptApiKey(); }
+          r = await fetch(url, { headers: { 'x-w10w-key': apiKey() || '' } });
+          if (r.status === 401) {
+            return { __error: 'api key missing or wrong - ask ryan' };
+          }
+        }
+        if (r.status === 403) {
           return { __error: `${label} authorization failed (${r.status}). Toast credentials may have expired and need renewal.` };
         }
         if (r.status >= 500 && attempt === 0) {

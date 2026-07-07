@@ -97,7 +97,11 @@ async function fetchScheduledShifts(token, startISO, endISO) {
   return fetchAllPages(base, token);
 }
 
+const { requireKey } = require('./_auth');
+
 exports.handler = async (event) => {
+  const denied = requireKey(event);
+  if (denied) return denied;
   try {
     const { start, end, debug } = event.queryStringParameters || {};
     if (!start || !end) {

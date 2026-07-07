@@ -1054,6 +1054,36 @@ input::placeholder{color:var(--ink-4)}
 </div>
 
 <script>
+// ══ API KEY (shared secret for /api/* data endpoints) ══
+// Enforced server-side once W10W_API_KEY is set in the Netlify env.
+var apiKeyPrompted = false;
+function apiKey(){
+  try { return localStorage.getItem('w10w-api-key') || ''; } catch(e) { return ''; }
+}
+function promptApiKey(){
+  var k = window.prompt('API key required (ask ryan):');
+  if (k) { try { localStorage.setItem('w10w-api-key', k.trim()); } catch(e) {} }
+  return apiKey();
+}
+// Drop-in fetch wrapper for /api/* calls: attaches the key header; on 401
+// prompts once for the key and retries once; if still 401, rejects so each
+// caller's existing error path fires.
+function apiFetch(url, opts){
+  opts = opts || {};
+  function withKey(){
+    var headers = Object.assign({}, opts.headers || {}, { 'x-w10w-key': apiKey() || '' });
+    return fetch(url, Object.assign({}, opts, { headers: headers }));
+  }
+  return withKey().then(function(r){
+    if (r.status !== 401) return r;
+    if (!apiKeyPrompted) { apiKeyPrompted = true; promptApiKey(); }
+    return withKey().then(function(r2){
+      if (r2.status === 401) throw new Error('api key missing or wrong - ask ryan');
+      return r2;
+    });
+  });
+}
+
 // ══ BUSINESS CONSTANTS ══
 var BIZ={name:"WEST10WEST",seats:23,barSeats:7,avgSpend:80,barShiftsPerWeek:9,eventsTarget:150000};
 
@@ -2715,7 +2745,7 @@ function loadTipData() {
   el.innerHTML = "<div style='text-align:center;padding:30px;color:var(--ink-4);font-size:12px'>Loading tip data from Toast...</div>";
   var endDate = new Date().toISOString();
   var startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  fetch("/api/toast-tips-by-server?start=" + encodeURIComponent(startDate) + "&end=" + encodeURIComponent(endDate))
+  apiFetch("/api/toast-tips-by-server?start=" + encodeURIComponent(startDate) + "&end=" + encodeURIComponent(endDate))
   .then(function(r) { return r.json(); })
   .then(function(data) {
     if (data.payments !== undefined) processTipData(data.payments);
@@ -3134,7 +3164,7 @@ function generateAIBrief(){
 
   userMsg+="\nNow think through the state like Ryan would. For trainees and new T1s specifically, reason about whether they've shown enough to be counted on. For T2 backup, think about whether we actually need a new hire or whether cross-training solves it. If yesterday's labor ratio or shift anomalies were flagged above, lead with those since they're the freshest operational signals. CHRONIC items (Events Lead unfilled, Paquita, etc.) get ONE short sentence MAX — Tanner has heard the case before, just remind him it's still open. End with what Tanner needs to actually do this week.";
 
-  fetch("/api/claude",{
+  apiFetch("/api/claude",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,system:systemMsg,messages:[{role:"user",content:userMsg}]})
@@ -3622,7 +3652,7 @@ function renderTodayCard(){
 function loadFixedCosts(){
   if(BE_FIXED_LOADING) return;
   BE_FIXED_LOADING=true;
-  fetch('/api/sheets')
+  apiFetch('/api/sheets')
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.fixedMonthly&&!isNaN(d.fixedMonthly)){
@@ -3706,7 +3736,7 @@ function loadYesterdayLabor(){
 
   // Fetch yesterday's labor (Toast time entries via /api/toast-labor-cost,
   // plus Tanner prorated for the day)
-  fetch("/api/toast-labor-cost?start="+encodeURIComponent(startIso)+"&end="+encodeURIComponent(endIso))
+  apiFetch("/api/toast-labor-cost?start="+encodeURIComponent(startIso)+"&end="+encodeURIComponent(endIso))
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.shifts === undefined){ laborCost = null; checkDone(); return; }
@@ -3791,7 +3821,7 @@ function loadTonightSchedule(){
     var dateStr = nyc.getFullYear() + "-" + String(nyc.getMonth()+1).padStart(2,"0") + "-" + String(nyc.getDate()).padStart(2,"0");
 
     var allShifts = [];
-    fetch("/api/toast-schedule-raw?start=" + dateStr + "&end=" + dateStr)
+    apiFetch("/api/toast-schedule-raw?start=" + dateStr + "&end=" + dateStr)
       .then(function(r){return r.json();})
       .then(function(d){
         if(d.scheduled_shifts === undefined){ tonightScheduleLoading = false; tonightScheduleData = null; return; }
@@ -3937,7 +3967,7 @@ function loadWeekScheduleFromSquare(){
     var endDate = sunNyc.getFullYear() + "-" + String(sunNyc.getMonth()+1).padStart(2,"0") + "-" + String(sunNyc.getDate()).padStart(2,"0");
 
     var allShifts = [];
-    fetch("/api/toast-schedule-raw?start=" + startDate + "&end=" + endDate)
+    apiFetch("/api/toast-schedule-raw?start=" + startDate + "&end=" + endDate)
       .then(function(r){return r.json();})
       .then(function(d){
         if(d.scheduled_shifts === undefined){
@@ -4275,7 +4305,7 @@ function fhLoadCogsFromSheets(onDone){
   }catch(e){}
 
   fhState.cogsStatus = "loading";
-  fetch("/api/sheets")
+  apiFetch("/api/sheets")
     .then(function(r){return r.json();})
     .then(function(d){
       var updated = false;
@@ -4320,7 +4350,7 @@ function fhFetchLaborCost(onDone){
   var startIso = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), 1, 5, 0, 0)).toISOString();
   var endIso = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), nyc.getDate()+1, 5, 0, 0)).toISOString();
 
-  fetch("/api/toast-labor-cost?start="+encodeURIComponent(startIso)+"&end="+encodeURIComponent(endIso))
+  apiFetch("/api/toast-labor-cost?start="+encodeURIComponent(startIso)+"&end="+encodeURIComponent(endIso))
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.shifts === undefined){ if(onDone) onDone(null); return; }
@@ -4874,7 +4904,7 @@ function squareOrdersFetch(startIso, endIso, onSuccess, onFail){
   // which returns Square-SHAPED orders built from Toast (pagination, voids, and the
   // tip/total money contract are all handled server-side). Function name kept so
   // the many callers stay untouched.
-  fetch("/api/toast-orders?start="+encodeURIComponent(startIso)+"&end="+encodeURIComponent(endIso))
+  apiFetch("/api/toast-orders?start="+encodeURIComponent(startIso)+"&end="+encodeURIComponent(endIso))
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.orders===undefined){onFail();return;}

@@ -144,7 +144,11 @@ function isoDur(iso) {
   return (+(m[1] || 0)) + (+(m[2] || 0)) / 60 + (+(m[3] || 0)) / 3600;
 }
 
+const { requireKey } = require('./_auth');
+
 exports.handler = async (event) => {
+  const denied = requireKey(event);
+  if (denied) return denied;
   try {
     const { start, end } = event.queryStringParameters || {};
     if (!start || !end) {

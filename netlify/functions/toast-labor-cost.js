@@ -110,7 +110,11 @@ async function fetchJobs(token) {
   return map;
 }
 
+const { requireKey } = require('./_auth');
+
 exports.handler = async (event) => {
+  const denied = requireKey(event);
+  if (denied) return denied;
   try {
     const { start, end } = event.queryStringParameters || {};
     if (!start || !end) {
