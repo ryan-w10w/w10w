@@ -1,3 +1,7 @@
+// NOTE: squareup.com support below is LEGACY — the POS migrated to Toast (2026-06-24)
+// and index.html now reads Toast via the toast-* shim functions. This proxy is still
+// used for Google Sheets/Docs. The SQUARE_TOKEN injection is harmless and kept in
+// case anything historical still points at Square.
 exports.handler = async function(event) {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method not allowed" };

@@ -756,9 +756,9 @@ input::placeholder{color:var(--ink-4)}
     <div class="card-hdr">
       <div>
         <div class="card-title" id="week-card-title">Monday shifts</div>
-        <div class="card-sub">Live from Square &middot; <span id="schedule-source-stamp" style="color:var(--ink-4)">loading...</span></div>
+        <div class="card-sub">Live from Toast &middot; <span id="schedule-source-stamp" style="color:var(--ink-4)">loading...</span></div>
       </div>
-      <a class="btn btn-sm" href="https://app.squareup.com/dashboard/staff/schedule" target="_blank" rel="noopener" style="text-decoration:none">Open in Square &rarr;</a>
+      <a class="btn btn-sm" href="https://www.toasttab.com/restaurants/admin/scheduling" target="_blank" rel="noopener" style="text-decoration:none">Open in Toast &rarr;</a>
     </div>
     <div id="week-view">
       <table class="shift-table">
@@ -847,9 +847,9 @@ input::placeholder{color:var(--ink-4)}
     <!-- Tip Pool Intelligence -->
     <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--line)">
       <div style="font-size:14px;font-weight:600;margin-bottom:4px">Tip pool intelligence</div>
-      <div style="font-size:12px;color:var(--ink-3);margin-bottom:14px">Who is generating the most tips per interaction. Pulled from Square transactions — updated weekly.</div>
+      <div style="font-size:12px;color:var(--ink-3);margin-bottom:14px">Who is generating the most tips per interaction. Pulled from Toast transactions — updated weekly.</div>
       <div style="display:flex;gap:8px;margin-bottom:14px">
-        <button class="btn btn-sm btn-primary" onclick="loadTipData()">↻ Refresh from Square</button>
+        <button class="btn btn-sm btn-primary" onclick="loadTipData()">↻ Refresh from Toast</button>
       </div>
       <div id="tip-content"></div>
     </div>
@@ -886,7 +886,7 @@ input::placeholder{color:var(--ink-4)}
 <div id="tab-breakeven" class="tab-pane">
   <div style="margin-bottom:14px">
     <div style="font-size:20px;font-weight:600;letter-spacing:-.3px;margin-bottom:3px">Break-even intelligence</div>
-    <div style="font-size:12px;color:var(--ink-3)">Fixed costs from Google Sheet &middot; 25% COGS &middot; Square paginated &middot; NYC time</div>
+    <div style="font-size:12px;color:var(--ink-3)">Fixed costs from Google Sheet &middot; 25% COGS &middot; Toast paginated &middot; NYC time</div>
   </div>
   <div id="be-summary" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px"></div>
   <div id="be-live-card" style="margin-bottom:16px"></div>
@@ -912,7 +912,7 @@ input::placeholder{color:var(--ink-4)}
   <div style="margin-bottom:14px;display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap">
     <div>
       <div style="font-size:20px;font-weight:600;letter-spacing:-.3px;margin-bottom:3px">Financial health</div>
-      <div style="font-size:12px;color:var(--ink-3)">Composite 0&ndash;100 score across 5 pillars. Revenue split live from Square. COGS rates from sheets or manual.</div>
+      <div style="font-size:12px;color:var(--ink-3)">Composite 0&ndash;100 score across 5 pillars. Revenue split live from Toast. COGS rates from sheets or manual.</div>
     </div>
     <div style="font-size:11px;color:var(--ink-3);font-family:'Geist Mono',monospace" id="fh-updated">—</div>
   </div>
@@ -986,7 +986,7 @@ input::placeholder{color:var(--ink-4)}
             <span class="fh-src-tag live" id="fh-labor-src" style="display:none">LIVE</span>
           </div>
           <input type="number" class="fh-input-field" id="fh-input-labor" placeholder="loading..." step="0.1" oninput="fhSaveInputs();renderFinancialHealth()" />
-          <div style="font-size:10px;color:var(--ink-4);margin-top:4px;font-family:\'Geist Mono\',monospace" id="fh-labor-meta">Will auto-fill from Square shifts</div>
+          <div style="font-size:10px;color:var(--ink-4);margin-top:4px;font-family:\'Geist Mono\',monospace" id="fh-labor-meta">Will auto-fill from Toast shifts</div>
         </div>
       </div>
       <div style="font-size:11px;color:var(--ink-4);margin-top:14px;margin-bottom:6px;font-family:'Geist Mono',monospace;text-transform:uppercase;letter-spacing:.08em">COGS rates &mdash; from sheets or manual override</div>
@@ -1654,7 +1654,7 @@ function renderWeek(){
   // Update source stamp under card title
   var stampEl = document.getElementById("schedule-source-stamp");
   if(stampEl){
-    if(weekScheduleSource === "square" && weekScheduleLoadedAt){
+    if(weekScheduleSource === "toast" && weekScheduleLoadedAt){
       var t = weekScheduleLoadedAt.toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
       stampEl.textContent = "synced " + t + " NYC";
     } else if(weekScheduleLoading){
@@ -2703,57 +2703,35 @@ function renderShiftPatterns(rows, days){
   panel.innerHTML = html;
 }
 
-// ══ TIP POOL INTELLIGENCE (Square API) ══
+// ══ TIP POOL INTELLIGENCE (Toast via /api/toast-tips-by-server) ══
+// Toast migration: payments come from the server-side shim (Toast auth never
+// reaches the browser). The old Square-token UI + localStorage path is gone.
 var tipData = null;
 var tipDataLoadedAt = null;
 
 function loadTipData() {
   var el = document.getElementById("tip-content");
   if (!el) return;
-  el.innerHTML = "<div style='text-align:center;padding:30px;color:var(--ink-4);font-size:12px'>Loading tip data from Square...</div>";
+  el.innerHTML = "<div style='text-align:center;padding:30px;color:var(--ink-4);font-size:12px'>Loading tip data from Toast...</div>";
   var endDate = new Date().toISOString();
   var startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  var squareApiUrl = "https://connect.squareup.com/v2/payments?location_id=LHSVRCNXBB7E8&begin_time=" + startDate + "&end_time=" + endDate + "&limit=200";
-  var squareToken = typeof SQUARE_TOKEN !== "undefined" ? SQUARE_TOKEN : null;
-  fetch("/api/proxy", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ url: squareApiUrl, method: "GET" })
-  })
+  fetch("/api/toast-tips-by-server?start=" + encodeURIComponent(startDate) + "&end=" + encodeURIComponent(endDate))
   .then(function(r) { return r.json(); })
   .then(function(data) {
-    if (data.payments !== undefined) {
-      processTipData(data.payments);
-    } else if (squareToken) {
-      fetch(squareApiUrl, { headers: { "Authorization": "Bearer " + squareToken, "Square-Version": "2024-01-18" } })
-      .then(function(r) { return r.json(); })
-      .then(function(d) { if (d.payments) processTipData(d.payments); else renderTipPlaceholder(); })
-      .catch(function() { renderTipPlaceholder(); });
-    } else {
-      renderTipPlaceholder();
-    }
+    if (data.payments !== undefined) processTipData(data.payments);
+    else renderTipPlaceholder();
   })
-  .catch(function() {
-    if (squareToken) {
-      fetch(squareApiUrl, { headers: { "Authorization": "Bearer " + squareToken, "Square-Version": "2024-01-18" } })
-      .then(function(r) { return r.json(); })
-      .then(function(data) { if (data.payments) processTipData(data.payments); else renderTipPlaceholder(); })
-      .catch(function() { renderTipPlaceholder(); });
-    } else {
-      renderTipPlaceholder();
-    }
-  });
+  .catch(function() { renderTipPlaceholder(); });
 }
 
 
 function processTipData(payments) {
-  // Group tips by team member name
+  // Group tips by server name (resolved server-side from Toast employees)
   var byStaff = {};
   payments.forEach(function(p) {
     var tipAmt = (p.tip_money && p.tip_money.amount) ? p.tip_money.amount : 0;
     if (tipAmt === 0) return;
-    var name = (p.team_member_id || 'Unknown');
-    // Try to match to staff roster name via note/receipt_url or team_member_id
+    var name = (p.server_name || 'Unknown');
     if (!byStaff[name]) byStaff[name] = { transactions: 0, totalTips: 0, tipAmounts: [] };
     byStaff[name].transactions++;
     byStaff[name].totalTips += tipAmt;
@@ -2769,15 +2747,10 @@ function renderTipPlaceholder() {
   var el = document.getElementById("tip-content");
   if (!el) return;
 
-  // Show the UI with mock data pattern so Tanner can see what it will look like
-  // and the Square token input
+  // Live fetch failed — show the sample layout so the panel isn't blank.
+  // (No token input anymore: Toast auth is handled server-side.)
   el.innerHTML =
-    '<div class="alert al-amber" style="margin-bottom:16px">Square API token required to pull live tip data. Enter your Square access token below — it is stored locally and never leaves your device.</div>' +
-    '<div style="display:flex;gap:8px;margin-bottom:20px">' +
-    '<input type="password" id="square-token-input" placeholder="Square access token (sq0atp-...)" style="flex:1;font-family:\'Geist Mono\',monospace;font-size:11px;border:1px solid var(--line-2);border-radius:var(--r);padding:8px 10px"/>' +
-    '<button class="btn btn-primary btn-sm" onclick="saveSquareToken()">Save + load</button>' +
-    '</div>' +
-    '<div style="font-size:11px;color:var(--ink-3);margin-bottom:20px">Get your token: Square Dashboard → Developers → Access tokens → Production. This is read-only access to payment data.</div>' +
+    '<div class="alert al-amber" style="margin-bottom:16px">Could not load tip data from Toast. Try again in a minute — if it keeps failing, check the Toast API credentials on the server.</div>' +
     '<div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);font-family:\'Geist Mono\',monospace;margin-bottom:10px">Preview — sample data</div>' +
     renderTipCardsHtml([
       { name: "Grace Lyons", role: "Bartender / Server", tipPerTx: 42.50, transactions: 18, total: 765, pct: 100 },
@@ -2791,7 +2764,7 @@ function renderTipPlaceholder() {
 function renderTipCardsHtml(staffList, isPreview) {
   var maxTipPerTx = Math.max.apply(null, staffList.map(function(s){ return s.tipPerTx; }));
   var html = '';
-  if (isPreview) html += '<div style="font-size:11px;font-style:italic;color:var(--ink-4);margin-bottom:12px">Sample data shown — connect Square to see live figures</div>';
+  if (isPreview) html += '<div style="font-size:11px;font-style:italic;color:var(--ink-4);margin-bottom:12px">Sample data shown — live figures return when Toast loads</div>';
 
   staffList.forEach(function(s, i) {
     var pct = Math.round((s.tipPerTx / maxTipPerTx) * 100);
@@ -2838,22 +2811,6 @@ function renderTipCards(byStaff) {
   el.innerHTML = html;
 }
 
-function saveSquareToken() {
-  var input = document.getElementById("square-token-input");
-  if (!input || !input.value.trim()) return;
-  try { localStorage.setItem("w10w-square-token", input.value.trim()); } catch(e){}
-  window.SQUARE_TOKEN = input.value.trim();
-  loadTipData();
-}
-
-function loadSquareToken() {
-  try {
-    var t = localStorage.getItem("w10w-square-token");
-    if (t) window.SQUARE_TOKEN = t;
-  } catch(e){}
-}
-
-
 // ══ BRIEF ══
 function generateBrief(force){
   var h=calcHealth();var k=calcKitchenHealth();
@@ -2886,7 +2843,7 @@ function generateBrief(force){
     if(schedBad.length > 0){
       var schedMsg = schedBad.length === 1
         ? "Schedule flag for tonight: " + schedBad[0].message
-        : "<strong>" + schedBad.length + " schedule flags</strong> for tonight — fix in Square before service.";
+        : "<strong>" + schedBad.length + " schedule flags</strong> for tonight — fix in Toast before service.";
       sentences.push(schedMsg);
       actions++;
     }
@@ -3163,16 +3120,16 @@ function generateAIBrief(){
 
   // TONIGHT'S SCHEDULE ANOMALIES — schedule mistakes Tanner built that need fixing before service
   if(typeof tonightScheduleData !== "undefined" && tonightScheduleData && tonightScheduleData.anomalies.length > 0){
-    userMsg += "\nTONIGHT SCHEDULE ANOMALIES (from what Tanner published in Square): ";
+    userMsg += "\nTONIGHT SCHEDULE ANOMALIES (from what Tanner published in Toast): ";
     userMsg += tonightScheduleData.anomalies.map(function(a){return "["+a.severity.toUpperCase()+"] "+a.message;}).join(" // ");
-    userMsg += " // CONTEXT: These are mistakes in the published schedule itself — a cook scheduled for 1 hour, two porters on a slow day, etc. They are fixable RIGHT NOW in Square before service starts. Lead with these — they\'re the most actionable signal.";
+    userMsg += " // CONTEXT: These are mistakes in the published schedule itself — a cook scheduled for 1 hour, two porters on a slow day, etc. They are fixable RIGHT NOW in Toast before service starts. Lead with these — they\'re the most actionable signal.";
   }
 
   // YESTERDAY SHIFT ANOMALIES — forgotten clock-outs, suspicious shift lengths
   if(typeof yesterdayShiftAnomalies !== "undefined" && yesterdayShiftAnomalies.length > 0){
     userMsg += "\nYESTERDAY SHIFT ANOMALIES: ";
     userMsg += yesterdayShiftAnomalies.map(function(a){return "["+a.severity.toUpperCase()+"] "+a.message;}).join(" // ");
-    userMsg += " // CONTEXT: A 1h shift on Square almost always means somebody forgot to clock out or got cut early without a logged reason. A 13h+ shift means somebody forgot to clock out. Both inflate labor cost reporting. Surface these directly to Tanner — they need fixing before payroll.";
+    userMsg += " // CONTEXT: A 1h shift on Toast almost always means somebody forgot to clock out or got cut early without a logged reason. A 13h+ shift means somebody forgot to clock out. Both inflate labor cost reporting. Surface these directly to Tanner — they need fixing before payroll.";
   }
 
   userMsg+="\nNow think through the state like Ryan would. For trainees and new T1s specifically, reason about whether they've shown enough to be counted on. For T2 backup, think about whether we actually need a new hire or whether cross-training solves it. If yesterday's labor ratio or shift anomalies were flagged above, lead with those since they're the freshest operational signals. CHRONIC items (Events Lead unfilled, Paquita, etc.) get ONE short sentence MAX — Tanner has heard the case before, just remind him it's still open. End with what Tanner needs to actually do this week.";
@@ -3226,7 +3183,7 @@ function showTab(t){
   document.querySelectorAll(".nav-tab").forEach(function(el,i){el.className="nav-tab"+(["roster","schedule","feedback","team","shifts","breakeven","financial"][i]===t?" active":"");});
   document.getElementById("tab-"+t).classList.add("active");
   if(t==="schedule"){
-    // Refresh Square schedule if stale (>5 min)
+    // Refresh Toast schedule if stale (>5 min)
     var stale = !weekScheduleLoadedAt || (Date.now() - weekScheduleLoadedAt.getTime()) > 5*60*1000;
     if(stale && typeof loadWeekScheduleFromSquare === "function") loadWeekScheduleFromSquare();
     renderDayBtns();renderWeek();populateCallout();
@@ -3314,7 +3271,7 @@ function renderProjection(){
     return s + (BE_DAY_WEIGHTS[day] || 1/7) * weeklyAvgSales;
   },0);
 
-  // MTD actual (from live Square data if available)
+  // MTD actual (from live Toast data if available)
   var mtdActual = beMonthlyLive || null;
 
   // If no live data, estimate MTD from elapsed days weighted by day-of-week
@@ -3543,13 +3500,13 @@ function renderTodayCard(){
   if(hour>=serviceStart && hour<serviceEnd) state="live";
   else if(hour>=serviceEnd || hour<4) state="closed";
   else state="prep";
-  // Roster today — prefer Square scheduled shifts (source of truth), fall back to in-app WEEK
+  // Roster today — prefer Toast scheduled shifts (source of truth), fall back to in-app WEEK
   var filled, totalPositions, gaps, rosterSource;
   if(tonightScheduleData && tonightScheduleData.totalCount > 0){
     totalPositions = tonightScheduleData.totalCount;
-    filled = totalPositions; // Square shifts that exist are by definition "filled" — they have a person
+    filled = totalPositions; // Toast shifts that exist are by definition "filled" — they have a person
     gaps = 0;
-    rosterSource = "square";
+    rosterSource = "toast";
   } else {
     var todayShifts = (WEEK[dayShort[dayIdx]] || []);
     filled = todayShifts.filter(function(sh){return sh.pid && sh.pid !== 0;}).length;
@@ -3604,14 +3561,14 @@ function renderTodayCard(){
   if(totalPositions===0){
     staffLbl = "No schedule set";
     staffCls = "";
-    staffSubLbl = rosterSource === "square" ? "Nothing on Square for tonight" : "Set in Schedule tab";
-  } else if(rosterSource === "square"){
+    staffSubLbl = rosterSource === "toast" ? "Nothing on Toast for tonight" : "Set in Schedule tab";
+  } else if(rosterSource === "toast"){
     // Show count + breakdown of jobs
     staffLbl = totalPositions + " on schedule";
     staffCls = "ok";
     var breakdown = tonightScheduleData.jobBreakdown;
     var topJobs = Object.keys(breakdown).map(function(j){ return breakdown[j] + " " + j.toLowerCase(); }).slice(0,2).join(" · ");
-    staffSubLbl = topJobs || "From Square";
+    staffSubLbl = topJobs || "From Toast";
   } else if(gaps === 0){
     staffLbl = "All " + filled + " filled";
     staffCls = "ok";
@@ -3747,31 +3704,16 @@ function loadYesterdayLabor(){
     checkDone();
   });
 
-  // Fetch yesterday's labor (uses Square Labor API, plus Tanner prorated for the day)
-  var allShifts = [];
-  function fetchLaborPage(cursor){
-    var bodyObj = {
-      query: { filter: { location_ids: ["LHSVRCNXBB7E8"], start: { start_at: startIso, end_at: endIso } } },
-      limit: 200
-    };
-    if(cursor) bodyObj.cursor = cursor;
-    fetch("/api/proxy", {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        url: "https://connect.squareup.com/v2/labor/shifts/search",
-        method: "POST", body: JSON.stringify(bodyObj)
-      })
-    })
+  // Fetch yesterday's labor (Toast time entries via /api/toast-labor-cost,
+  // plus Tanner prorated for the day)
+  fetch("/api/toast-labor-cost?start="+encodeURIComponent(startIso)+"&end="+encodeURIComponent(endIso))
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.shifts === undefined){ laborCost = null; checkDone(); return; }
-      allShifts = allShifts.concat(d.shifts);
-      if(d.cursor && d.shifts.length === 200){ fetchLaborPage(d.cursor); }
-      else { aggregateYesterdayLabor(); }
+      aggregateYesterdayLabor(d.shifts);
     })
     .catch(function(){ laborCost = null; checkDone(); });
-  }
-  function aggregateYesterdayLabor(){
+  function aggregateYesterdayLabor(allShifts){
     var totalHourly = 0;
     var shiftAnomalies = []; // detected red flags
     allShifts.forEach(function(sh){
@@ -3779,24 +3721,15 @@ function loadYesterdayLabor(){
       var startMs = new Date(sh.start_at).getTime();
       var endMs = new Date(sh.end_at).getTime();
       var grossHours = (endMs - startMs) / (1000 * 60 * 60);
-      var breakMs = 0;
-      var paidBreakMs = 0;
-      (sh.breaks || []).forEach(function(br){
-        if(br.start_at && br.end_at){
-          var brMs = new Date(br.end_at).getTime() - new Date(br.start_at).getTime();
-          if(br.is_paid === false){ breakMs += brMs; }
-          else { paidBreakMs += brMs; }
-        }
-      });
-      var netHours = Math.max(0, (endMs - startMs - breakMs) / (1000 * 60 * 60));
-      var hourlyRateCents = (sh.wage && sh.wage.hourly_rate && sh.wage.hourly_rate.amount) || 0;
-      totalHourly += netHours * (hourlyRateCents / 100);
+      // Toast migration: sh.hours is the authoritative PAID hours (regular +
+      // overtime, net of unpaid breaks) — no client-side break math anymore.
+      var netHours = sh.hours || 0;
+      totalHourly += netHours * ((sh.hourly_rate_cents || 0) / 100);
 
       // ═══ SHIFT ANOMALY DETECTION ═══
-      var teamName = (sh.team_member_id) ? null : null; // we don't have name resolution from Labor API directly
-      // Try to resolve via job title from wage
-      var jobTitle = (sh.wage && sh.wage.title) || "Staff";
-      var personName = teamMemberMap[sh.team_member_id] || jobTitle;
+      // Names and job titles are resolved server-side by the shim.
+      var jobTitle = sh.job_title || "Staff";
+      var personName = sh.name || jobTitle;
       var startTime = new Date(sh.start_at).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
       var endTime = new Date(sh.end_at).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
 
@@ -3834,69 +3767,23 @@ function loadYesterdayLabor(){
     yesterdayShiftAnomalies = shiftAnomalies;
     checkDone();
   }
-  fetchLaborPage(null);
 }
 
 // ═══════════════════════════════════════════════════════
-// TONIGHT'S SCHEDULED SHIFTS (from Square's published schedule)
+// TONIGHT'S SCHEDULED SHIFTS (from Toast's published schedule)
 // Pulls today's scheduled shifts and validates the schedule itself for red flags
 // like 1-hour shifts, double-stacked porters on slow days, etc.
+// Toast migration: /api/toast-schedule-raw resolves employee names and job titles
+// server-side, so the old team-members / jobs lookups are gone.
 // ═══════════════════════════════════════════════════════
 var tonightScheduleData = null; // {shifts:[], anomalies:[], totalCount, jobBreakdown}
 var tonightScheduleLoading = false;
-var teamMemberMap = {}; // id → name, populated from /v2/team-members/search
-var jobsMap = {}; // id → title, populated from /v2/team/jobs (Bartender, Cook, etc.)
-var jobsLoaded = false;
-
-function loadTeamMembers(onDone){
-  fetch("/api/proxy", {
-    method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      url: "https://connect.squareup.com/v2/team-members/search",
-      method: "POST",
-      body: JSON.stringify({ query: { filter: { location_ids: ["LHSVRCNXBB7E8"], status: "ACTIVE" } }, limit: 200 })
-    })
-  })
-  .then(function(r){return r.json();})
-  .then(function(d){
-    (d.team_members || []).forEach(function(tm){
-      teamMemberMap[tm.id] = tm.given_name + (tm.family_name ? " " + tm.family_name : "");
-    });
-    if(onDone) onDone();
-  })
-  .catch(function(){ if(onDone) onDone(); });
-}
-
-function loadJobs(onDone){
-  if(jobsLoaded){ if(onDone) onDone(); return; }
-  fetch("/api/proxy", {
-    method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      url: "https://connect.squareup.com/v2/team/jobs",
-      method: "GET", body: ""
-    })
-  })
-  .then(function(r){return r.json();})
-  .then(function(d){
-    (d.jobs || []).forEach(function(j){ jobsMap[j.id] = j.title; });
-    jobsLoaded = true;
-    if(onDone) onDone();
-  })
-  .catch(function(){ if(onDone) onDone(); });
-}
 
 function loadTonightSchedule(){
   if(tonightScheduleLoading) return;
   tonightScheduleLoading = true;
 
-  function ensureDeps(cb){
-    var pending = 2;
-    function done(){ pending--; if(pending===0) cb(); }
-    if(Object.keys(teamMemberMap).length === 0) loadTeamMembers(done); else done();
-    if(!jobsLoaded) loadJobs(done); else done();
-  }
-
-  ensureDeps(fetchTodaysShifts);
+  fetchTodaysShifts();
 
   function fetchTodaysShifts(){
     var nowUtc = new Date();
@@ -3904,37 +3791,14 @@ function loadTonightSchedule(){
     var dateStr = nyc.getFullYear() + "-" + String(nyc.getMonth()+1).padStart(2,"0") + "-" + String(nyc.getDate()).padStart(2,"0");
 
     var allShifts = [];
-    function fetchPage(cursor){
-      var bodyObj = {
-        limit: 200,
-        query: {
-          filter: {
-            location_ids: ["LHSVRCNXBB7E8"],
-            workday: {
-              date_range: { start_date: dateStr, end_date: dateStr },
-              default_timezone: "America/New_York",
-              match_scheduled_shifts_by: "START_AT"
-            }
-          }
-        }
-      };
-      if(cursor) bodyObj.cursor = cursor;
-      fetch("/api/proxy", {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          url: "https://connect.squareup.com/v2/labor/scheduled-shifts/search",
-          method: "POST", body: JSON.stringify(bodyObj)
-        })
-      })
+    fetch("/api/toast-schedule-raw?start=" + dateStr + "&end=" + dateStr)
       .then(function(r){return r.json();})
       .then(function(d){
         if(d.scheduled_shifts === undefined){ tonightScheduleLoading = false; tonightScheduleData = null; return; }
-        allShifts = allShifts.concat(d.scheduled_shifts);
-        if(d.cursor && d.scheduled_shifts.length > 0){ fetchPage(d.cursor); }
-        else { analyzeSchedule(); }
+        allShifts = d.scheduled_shifts;
+        analyzeSchedule();
       })
       .catch(function(){ tonightScheduleLoading = false; tonightScheduleData = null; });
-    }
 
     function analyzeSchedule(){
       var anomalies = [];
@@ -3948,17 +3812,16 @@ function loadTonightSchedule(){
       var isSlowDay = avgSales > 0 && avgSales < 2500;
 
       allShifts.forEach(function(sh){
-        var det = sh.published_shift_details || sh.draft_shift_details;
-        if(!det || det.is_deleted) return;
-        if(!det.start_at || !det.end_at) return;
+        // Toast shim emits flat shifts (deleted/unpublished filtered server-side)
+        if(!sh.start_at || !sh.end_at) return;
 
-        var startMs = new Date(det.start_at).getTime();
-        var endMs = new Date(det.end_at).getTime();
+        var startMs = new Date(sh.start_at).getTime();
+        var endMs = new Date(sh.end_at).getTime();
         var grossHours = (endMs - startMs) / (1000 * 60 * 60);
-        var jobTitle = jobsMap[det.job_id] || "Staff";
-        var name = teamMemberMap[det.team_member_id] || jobTitle;
-        var startTime = new Date(det.start_at).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
-        var endTime = new Date(det.end_at).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
+        var jobTitle = sh.job_title || "Staff";
+        var name = sh.name || jobTitle;
+        var startTime = new Date(sh.start_at).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
+        var endTime = new Date(sh.end_at).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit"});
 
         jobBreakdown[jobTitle] = (jobBreakdown[jobTitle] || 0) + 1;
         shiftSummary.push({ name: name, job: jobTitle, hours: grossHours, window: startTime + "–" + endTime });
@@ -3993,12 +3856,10 @@ function loadTonightSchedule(){
       // Aggregate labor projection — use default rate since scheduled shifts may not have wage info
       var estLabor = 0;
       allShifts.forEach(function(sh){
-        var det = sh.published_shift_details || sh.draft_shift_details;
-        if(!det || det.is_deleted) return;
-        if(!det.start_at || !det.end_at) return;
-        var hrs = (new Date(det.end_at).getTime() - new Date(det.start_at).getTime()) / (1000*60*60);
+        if(!sh.start_at || !sh.end_at) return;
+        var hrs = (new Date(sh.end_at).getTime() - new Date(sh.start_at).getTime()) / (1000*60*60);
         // Default rate by job type (rough estimates)
-        var title = (jobsMap[det.job_id] || "").toLowerCase();
+        var title = (sh.job_title || "").toLowerCase();
         var rate = 22;
         if(title.indexOf("manager") > -1 || title.indexOf("lead") > -1 || title.indexOf("chef") > -1) rate = 30;
         else if(title.indexOf("bartender") > -1) rate = 26;
@@ -4036,18 +3897,17 @@ function loadTonightSchedule(){
 }
 
 // ═══════════════════════════════════════════════════════
-// WEEK SCHEDULE — pulled live from Square (replaces in-app schedule entry)
-// Populates WEEK object from Square Labor API for all 7 days of current week.
-// Position label = Square wage.title verbatim. Tier comes from local roster.
+// WEEK SCHEDULE — pulled live from Toast (replaces in-app schedule entry)
+// Populates WEEK object from /api/toast-schedule-raw for all 7 days of current week.
+// Position label = Toast job title verbatim. Tier comes from local roster.
+// (Function keeps its historical name; it reads Toast via the server-side shim.)
 // ═══════════════════════════════════════════════════════
 var weekScheduleLoading = false;
 var weekScheduleLoadedAt = null;
-var weekScheduleSource = "local"; // "square" or "local"
+var weekScheduleSource = "local"; // "toast" (live from POS) or "local"
 
-// Match a Square team_member_id → staff record in the tool's roster
-function matchStaffByTeamMember(tmId){
-  if(!tmId) return null;
-  var tmName = teamMemberMap[tmId];
+// Match a POS employee name → staff record in the tool's roster
+function matchStaffByName(tmName){
   if(!tmName) return null;
   // Exact full-name match first
   var exact = staff.find(function(s){return s.name.toLowerCase() === tmName.toLowerCase();});
@@ -4063,15 +3923,7 @@ function loadWeekScheduleFromSquare(){
   if(weekScheduleLoading) return;
   weekScheduleLoading = true;
 
-  // Make sure team member names AND job titles are loaded
-  function ensureDeps(cb){
-    var pending = 2;
-    function done(){ pending--; if(pending===0) cb(); }
-    if(Object.keys(teamMemberMap).length === 0) loadTeamMembers(done); else done();
-    if(!jobsLoaded) loadJobs(done); else done();
-  }
-
-  ensureDeps(fetchWeek);
+  fetchWeek();
 
   function fetchWeek(){
     var nowUtc = new Date();
@@ -4085,77 +3937,52 @@ function loadWeekScheduleFromSquare(){
     var endDate = sunNyc.getFullYear() + "-" + String(sunNyc.getMonth()+1).padStart(2,"0") + "-" + String(sunNyc.getDate()).padStart(2,"0");
 
     var allShifts = [];
-    function fetchPage(cursor){
-      var bodyObj = {
-        limit: 200,
-        query: {
-          filter: {
-            location_ids: ["LHSVRCNXBB7E8"],
-            workday: {
-              date_range: { start_date: startDate, end_date: endDate },
-              default_timezone: "America/New_York",
-              match_scheduled_shifts_by: "START_AT"
-            }
-          }
-        }
-      };
-      if(cursor) bodyObj.cursor = cursor;
-      fetch("/api/proxy", {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          url: "https://connect.squareup.com/v2/labor/scheduled-shifts/search",
-          method: "POST", body: JSON.stringify(bodyObj)
-        })
-      })
+    fetch("/api/toast-schedule-raw?start=" + startDate + "&end=" + endDate)
       .then(function(r){return r.json();})
       .then(function(d){
         if(d.scheduled_shifts === undefined){
           weekScheduleLoading = false;
           return;
         }
-        allShifts = allShifts.concat(d.scheduled_shifts);
-        if(d.cursor && d.scheduled_shifts.length > 0){ fetchPage(d.cursor); }
-        else { buildWeek(); }
+        allShifts = d.scheduled_shifts;
+        buildWeek();
       })
       .catch(function(){ weekScheduleLoading = false; });
-    }
 
     function buildWeek(){
       var dayShorts = ["sun","mon","tue","wed","thu","fri","sat"];
       var newWeek = { mon:[], tue:[], wed:[], thu:[], fri:[], sat:[], sun:[] };
 
       allShifts.forEach(function(sh){
-        // Prefer published_shift_details (source of truth) — fall back to draft if not yet published
-        var det = sh.published_shift_details || sh.draft_shift_details;
-        if(!det || det.is_deleted) return;
-        if(!det.start_at || !det.end_at) return;
+        // Toast shim emits flat shifts (deleted ones filtered server-side)
+        if(!sh.start_at || !sh.end_at) return;
 
         // Determine NYC day-of-week for the shift\'s start
-        var startNyc = new Date(new Date(det.start_at).toLocaleString("en-US",{timeZone:"America/New_York"}));
+        var startNyc = new Date(new Date(sh.start_at).toLocaleString("en-US",{timeZone:"America/New_York"}));
         var dayKey = dayShorts[startNyc.getDay()];
 
-        // Position label = looked-up job title (Cook, Bartender, etc.)
-        var pos = jobsMap[det.job_id] || "Staff";
+        // Position label = Toast job title (Cook, Bartender, etc.)
+        var pos = sh.job_title || "Staff";
 
         // Time string e.g. "5:00pm-11:00pm"
         var fmt = function(iso){
           return new Date(iso).toLocaleTimeString("en-US",{timeZone:"America/New_York",hour:"numeric",minute:"2-digit",hour12:true}).toLowerCase().replace(" ","");
         };
-        var time = fmt(det.start_at) + "-" + fmt(det.end_at);
+        var time = fmt(sh.start_at) + "-" + fmt(sh.end_at);
 
-        // Match team member to local roster → grab pid for tier badge
-        var p = matchStaffByTeamMember(det.team_member_id);
+        // Match employee name to local roster → grab pid for tier badge
+        var p = matchStaffByName(sh.name);
         var pid = p ? p.id : null;
-        var rawName = teamMemberMap[det.team_member_id] || "";
+        var rawName = sh.name || "";
 
         newWeek[dayKey].push({
           pos: pos,
           time: time,
           pid: pid,
           rawName: rawName,
-          square_id: sh.id,
-          start_at: det.start_at,
-          end_at: det.end_at
+          pos_shift_id: sh.id,
+          start_at: sh.start_at,
+          end_at: sh.end_at
         });
       });
 
@@ -4167,14 +3994,12 @@ function loadWeekScheduleFromSquare(){
       });
 
       WEEK = newWeek;
-      weekScheduleSource = "square";
+      weekScheduleSource = "toast";
       weekScheduleLoadedAt = new Date();
       weekScheduleLoading = false;
       if(typeof renderWeek === "function" && activeTab === "schedule") renderWeek();
       if(typeof renderDayBtns === "function" && activeTab === "schedule") renderDayBtns();
     }
-
-    fetchPage(null);
   }
 }
 
@@ -4185,13 +4010,13 @@ function loadWeekScheduleFromSquare(){
 
 
 // ═══════════════════════════════════════════════════════
-// REFRESH 12MO NIGHTLY AVERAGES FROM SQUARE
+// REFRESH 12MO NIGHTLY AVERAGES FROM TOAST
 // ═══════════════════════════════════════════════════════
 function refreshNightlyAverages(){
   var btn=document.getElementById("refresh-avgs-btn");
   var stamp=document.getElementById("be-avg-stamp");
   if(btn){btn.disabled=true;btn.textContent="Loading 12mo...";}
-  if(stamp)stamp.textContent="Fetching 12 months of data from Square...";
+  if(stamp)stamp.textContent="Fetching 12 months of data from Toast...";
   var nowUtc=new Date();
   var nycNow=new Date(nowUtc.toLocaleString("en-US",{timeZone:"America/New_York"}));
   var endIso=new Date(Date.UTC(nycNow.getFullYear(),nycNow.getMonth(),nycNow.getDate(),5,0,0)).toISOString();
@@ -4244,7 +4069,7 @@ function refreshNightlyAverages(){
     },
     function(){
       if(btn){btn.disabled=false;btn.textContent="Refresh 12mo";}
-      if(stamp)stamp.textContent="Could not load. Check Square connection.";
+      if(stamp)stamp.textContent="Could not load. Check Toast connection.";
     }
   );
 }
@@ -4269,7 +4094,7 @@ function loadPersistedAverages(){
 
 // State
 var fhState = {
-  totalMtd: null,          // net MTD from Square
+  totalMtd: null,          // net MTD from Toast
   cocktailRev: null,       // from category split
   wineRev: null,
   foodRev: null,
@@ -4296,7 +4121,7 @@ var fhState = {
 
 var FH_DEFAULTS = { cocktailCogsPct:14.5, wineCogsPct:22.0, foodCogsPct:15.3, cocktailWastePct:2.0, wineWastePct:4.0, foodWastePct:10.0 };
 var FH_TARGETS = { cashTarget:30000, creditLimit:70000, q1AvgMonthly:91344 };
-var FH_TANNER_SALARY_MONTHLY = 7084;  // Only salaried staff — Square Labor API misses this
+var FH_TANNER_SALARY_MONTHLY = 7084;  // Only salaried staff — Toast time entries miss this
 
 function fhSeats(){
   var m = new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"})).getMonth();
@@ -4367,7 +4192,7 @@ function fhPopulateInputFields(){
   setVal("fh-input-cktl-waste", fhState.cocktailWastePct, FH_DEFAULTS.cocktailWastePct);
   setVal("fh-input-wine-waste", fhState.wineWastePct, FH_DEFAULTS.wineWastePct);
   setVal("fh-input-food-waste", fhState.foodWastePct, FH_DEFAULTS.foodWastePct);
-  // Labor — prefer live from Square
+  // Labor — prefer live from Toast
   var laborEl = document.getElementById("fh-input-labor");
   var laborSrc = document.getElementById("fh-labor-src");
   var laborMeta = document.getElementById("fh-labor-meta");
@@ -4387,14 +4212,14 @@ function fhPopulateInputFields(){
     if(fhState.laborSource === "manual"){
       if(laborEl.value === "" || !laborEl.value) laborEl.value = fhState.laborPct || 29.3;
       if(laborSrc) laborSrc.style.display = "none";
-      if(laborMeta) laborMeta.textContent = "Square labor fetch failed — manual value";
+      if(laborMeta) laborMeta.textContent = "Toast labor fetch failed — manual value";
     } else {
       if(!laborEl.value) laborEl.placeholder = "loading...";
     }
   }
 }
 
-// ═══ SQUARE CATEGORY SPLIT ═══
+// ═══ CATEGORY SPLIT (Toast) ═══
 function fhFetchCategorySplit(onDone){
   fhState.splitStatus = "loading";
   var nowUtc = new Date();
@@ -4403,71 +4228,26 @@ function fhFetchCategorySplit(onDone){
   var end = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), nyc.getDate(), 23, 59, 59)).toISOString();
 
   squareOrdersFetch(start, end, function(orders){
-    // Collect unique catalog IDs
-    var idSet = {};
+    // Toast migration: /api/toast-orders resolves each line item's category
+    // server-side (menu-item SKU prefix first — the same COCKTAIL_/WINE/FOOD_
+    // convention the old Square catalog batch-retrieve keyed on, carried over into
+    // Toast's menu — Toast sales category as fallback) and emits
+    // line_items[].category_name as "Cocktail" | "Wine" | "Food" | null.
+    // NA beverages / unmapped items stay uncounted, matching the old behavior.
+    var cktl = 0, wine = 0, food = 0;
     orders.forEach(function(o){
       (o.line_items || []).forEach(function(li){
-        if(li.catalog_object_id) idSet[li.catalog_object_id] = true;
+        var amt = (li.gross_sales_money && li.gross_sales_money.amount || 0) / 100;
+        if(li.category_name === "Cocktail") cktl += amt;
+        else if(li.category_name === "Wine") wine += amt;
+        else if(li.category_name === "Food") food += amt;
       });
     });
-    var uniqueIds = Object.keys(idSet);
-    if(uniqueIds.length === 0){
-      fhState.cocktailRev = 0; fhState.wineRev = 0; fhState.foodRev = 0;
-      fhState.splitStatus = "done";
-      if(onDone) onDone();
-      return;
-    }
-
-    // Batch retrieve in chunks of 1000 (Square limit)
-    var idToSku = {};
-    var chunks = [];
-    for(var i=0; i<uniqueIds.length; i+=1000) chunks.push(uniqueIds.slice(i, i+1000));
-    var chunkDone = 0;
-    function processBatch(){
-      chunks.forEach(function(chunk){
-        fetch("/api/proxy", {
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({
-            url: "https://connect.squareup.com/v2/catalog/batch-retrieve",
-            method: "POST",
-            body: JSON.stringify({ object_ids: chunk })
-          })
-        })
-        .then(function(r){return r.json();})
-        .then(function(data){
-          (data.objects || []).forEach(function(obj){
-            if(obj.item_variation_data && obj.item_variation_data.sku){
-              idToSku[obj.id] = obj.item_variation_data.sku;
-            }
-          });
-          chunkDone++;
-          if(chunkDone === chunks.length) aggregateRevenue();
-        })
-        .catch(function(){
-          chunkDone++;
-          if(chunkDone === chunks.length) aggregateRevenue();
-        });
-      });
-    }
-    function aggregateRevenue(){
-      var cktl = 0, wine = 0, food = 0;
-      orders.forEach(function(o){
-        (o.line_items || []).forEach(function(li){
-          var sku = idToSku[li.catalog_object_id] || "";
-          var amt = (li.gross_sales_money && li.gross_sales_money.amount || 0) / 100;
-          if(sku.indexOf("COCKTAIL_") === 0) cktl += amt;
-          else if(sku.indexOf("WINE") === 0) wine += amt;
-          else if(sku.indexOf("FOOD_") === 0) food += amt;
-        });
-      });
-      fhState.cocktailRev = Math.round(cktl);
-      fhState.wineRev = Math.round(wine);
-      fhState.foodRev = Math.round(food);
-      fhState.splitStatus = "done";
-      if(onDone) onDone();
-    }
-    processBatch();
+    fhState.cocktailRev = Math.round(cktl);
+    fhState.wineRev = Math.round(wine);
+    fhState.foodRev = Math.round(food);
+    fhState.splitStatus = "done";
+    if(onDone) onDone();
   }, function(){
     fhState.splitStatus = "error";
     if(onDone) onDone();
@@ -4532,7 +4312,7 @@ function fhLoadCogsFromSheets(onDone){
 
 // ═══ FETCH ALL ═══
 
-// ═══ SQUARE LABOR COST FROM LABOR API ═══
+// ═══ LABOR COST (Toast time entries via /api/toast-labor-cost) ═══
 function fhFetchLaborCost(onDone){
   var nowUtc = new Date();
   var nyc = new Date(nowUtc.toLocaleString("en-US",{timeZone:"America/New_York"}));
@@ -4540,69 +4320,32 @@ function fhFetchLaborCost(onDone){
   var startIso = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), 1, 5, 0, 0)).toISOString();
   var endIso = new Date(Date.UTC(nyc.getFullYear(), nyc.getMonth(), nyc.getDate()+1, 5, 0, 0)).toISOString();
 
-  var allShifts = [];
-  function fetchPage(cursor){
-    var bodyObj = {
-      query: {
-        filter: {
-          location_ids: ["LHSVRCNXBB7E8"],
-          start: { start_at: startIso, end_at: endIso }
-        }
-      },
-      limit: 200
-    };
-    if(cursor) bodyObj.cursor = cursor;
-    fetch("/api/proxy", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        url: "https://connect.squareup.com/v2/labor/shifts/search",
-        method: "POST",
-        body: JSON.stringify(bodyObj)
-      })
-    })
+  fetch("/api/toast-labor-cost?start="+encodeURIComponent(startIso)+"&end="+encodeURIComponent(endIso))
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.shifts === undefined){ if(onDone) onDone(null); return; }
-      allShifts = allShifts.concat(d.shifts);
-      if(d.cursor && d.shifts.length === 200){ fetchPage(d.cursor); }
-      else { aggregateLabor(); }
+      // Toast migration: shift hours arrive as authoritative PAID hours (regular +
+      // overtime, already net of unpaid breaks) — no break math needed here.
+      var totalHourlyWages = 0;
+      d.shifts.forEach(function(sh){
+        totalHourlyWages += (sh.hours || 0) * ((sh.hourly_rate_cents || 0) / 100);
+      });
+      // Add Tanner's monthly salary — only salaried staff, prorated to MTD
+      // Salaried staff don't appear in Toast time entries; without this, labor % reads low.
+      var nyc2 = new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"}));
+      var daysPassed = nyc2.getDate();
+      var daysInMonth = new Date(nyc2.getFullYear(), nyc2.getMonth()+1, 0).getDate();
+      var salaryMtd = (FH_TANNER_SALARY_MONTHLY * daysPassed) / daysInMonth;
+      // Apply payroll tax uplift (10.65% — matches break-even model) to both streams
+      var totalLaborCost = (totalHourlyWages + salaryMtd) * 1.1065;
+      if(onDone) onDone({
+        hourlyWages: Math.round(totalHourlyWages),
+        salaryMtd: Math.round(salaryMtd),
+        totalCost: Math.round(totalLaborCost),
+        shiftCount: d.shifts.length
+      });
     })
     .catch(function(){ if(onDone) onDone(null); });
-  }
-  function aggregateLabor(){
-    var totalHourlyWages = 0;
-    allShifts.forEach(function(sh){
-      if(!sh.start_at || !sh.end_at) return;
-      var startMs = new Date(sh.start_at).getTime();
-      var endMs = new Date(sh.end_at).getTime();
-      // Subtract unpaid break time
-      var breakMs = 0;
-      (sh.breaks || []).forEach(function(br){
-        if(br.is_paid === false && br.start_at && br.end_at){
-          breakMs += new Date(br.end_at).getTime() - new Date(br.start_at).getTime();
-        }
-      });
-      var netHours = Math.max(0, (endMs - startMs - breakMs) / (1000 * 60 * 60));
-      var hourlyRateCents = (sh.wage && sh.wage.hourly_rate && sh.wage.hourly_rate.amount) || 0;
-      totalHourlyWages += netHours * (hourlyRateCents / 100);
-    });
-    // Add Tanner's monthly salary — only salaried staff, prorated to MTD
-    // Salaried staff don't appear in Square Labor shifts; without this, labor % reads low.
-    var nyc = new Date(new Date().toLocaleString("en-US",{timeZone:"America/New_York"}));
-    var daysPassed = nyc.getDate();
-    var daysInMonth = new Date(nyc.getFullYear(), nyc.getMonth()+1, 0).getDate();
-    var salaryMtd = (FH_TANNER_SALARY_MONTHLY * daysPassed) / daysInMonth;
-    // Apply payroll tax uplift (10.65% — matches break-even model) to both streams
-    var totalLaborCost = (totalHourlyWages + salaryMtd) * 1.1065;
-    if(onDone) onDone({
-      hourlyWages: Math.round(totalHourlyWages),
-      salaryMtd: Math.round(salaryMtd),
-      totalCost: Math.round(totalLaborCost),
-      shiftCount: allShifts.length
-    });
-  }
-  fetchPage(null);
 }
 
 function fhFetchAll(){
@@ -4647,7 +4390,7 @@ function fhFetchAll(){
   pending++;
   fhLoadCogsFromSheets(pendCheck);
 
-  // 4. Labor cost from Square Labor API — only re-compute pct after totalMtd resolved
+  // 4. Labor cost from Toast time entries — only re-compute pct after totalMtd resolved
   pending++;
   fhFetchLaborCost(function(labor){
     if(labor){
@@ -4706,7 +4449,7 @@ function fhCalcScore(){
   else if(daysRunway >= 7) p1 = 5;
   else p1 = 2;
 
-  // Pillar 2 — Profitability — prefer live labor from Square when available
+  // Pillar 2 — Profitability — prefer live labor from Toast when available
   var laborPctLive = (inputs.laborCostMtd !== null && totalMtd > 0)
     ? (inputs.laborCostMtd / totalMtd) * 100
     : null;
@@ -4855,7 +4598,7 @@ function renderFinancialHealth(){
     var cktlSrc = splitDone ? "live" : "calc";
     var wineSrc = splitDone ? "live" : "calc";
     var foodSrc = splitDone ? "live" : "calc";
-    // Match per-row logic — when Square split is live, the blended is live too.
+    // Match per-row logic — when the Toast split is live, the blended is live too.
     // The COGS rate source is separately noted in the header text above.
     var cogsSrc = splitDone ? "live" : "calc";
     var blendedCogs = calc.cktlCogs + calc.wineCogs + calc.foodCogs;
@@ -4876,9 +4619,9 @@ function renderFinancialHealth(){
   var cogsStamp = document.getElementById("fh-cogs-stamp");
   if(cogsStamp){
     if(fhState.splitStatus === "done" && fhState.totalMtd){
-      cogsStamp.textContent = "Square revenue live · "+(fhState.cogsStatus==="done"?"COGS from sheets":fhState.cogsStatus==="cached"?"COGS cached":"COGS manual");
+      cogsStamp.textContent = "Toast revenue live · "+(fhState.cogsStatus==="done"?"COGS from sheets":fhState.cogsStatus==="cached"?"COGS cached":"COGS manual");
     } else if(fhState.splitStatus === "loading" || fhState.loading){
-      cogsStamp.textContent = "Loading from Square...";
+      cogsStamp.textContent = "Loading from Toast...";
     } else {
       cogsStamp.textContent = "Click Refresh all to pull live data";
     }
@@ -4957,7 +4700,7 @@ function renderFhDetail(calc){
       '<div class="fh-metric-grid">'+
         metric("Prime cost", calc.prime.toFixed(1)+"%", "COGS + labor", primeCls)+
         metric("Blended COGS", calc.blendedPct.toFixed(1)+"%", "of revenue")+
-        metric("Labor", calc.laborPct.toFixed(1)+"%", (calc.laborPctLive!==null?"live from Square":"manual entry"))+
+        metric("Labor", calc.laborPct.toFixed(1)+"%", (calc.laborPctLive!==null?"live from Toast":"manual entry"))+
         metric("After-COGS $", fhMoney(calc.marginAfterCogs), "margin available")+
       '</div>';
     if(calc.prime > 68) html += finding("Prime cost over 68%. Either COGS or labor (or both) need attention. Start with the higher of the two.", "bad");
@@ -5086,7 +4829,7 @@ function renderBeLive(sales){
   var nd=BE_NIGHTS.find(function(n){return n.day===tonight;});
   if(!nd)return;
   if(sales===null){
-    el.innerHTML='<div class="be-live"><div class="be-live-lbl">Tonight live</div><div class="be-live-night" style="opacity:.5">Loading from Square...</div></div>';
+    el.innerHTML='<div class="be-live"><div class="be-live-lbl">Tonight live</div><div class="be-live-night" style="opacity:.5">Loading from Toast...</div></div>';
     return;
   }
   var target=nd.beTarget;
@@ -5113,8 +4856,10 @@ function renderBeLive(sales){
 }
 
 function squareNetFromOrders(orders){
-  // Confirmed formula matching Square dashboard exactly
-  // net = total - tax - tip - service_charge
+  // net = total - tax - tip - service_charge (the formula that matched the Square
+  // dashboard exactly). The Toast shim emits the same cent-denominated fields and
+  // preserves the contract (verified against reconciled Toast data to the dollar),
+  // so this function is unchanged post-migration.
   return orders.reduce(function(s,o){
     var total=(o.total_money&&o.total_money.amount)||0;
     var tax=(o.total_tax_money&&o.total_tax_money.amount)||0;
@@ -5125,24 +4870,16 @@ function squareNetFromOrders(orders){
 }
 
 function squareOrdersFetch(startIso, endIso, onSuccess, onFail){
-  var ordersUrl="https://connect.squareup.com/v2/orders/search";
-  var allOrders=[];
-  function fetchPage(cursor){
-    var bodyObj={location_ids:["LHSVRCNXBB7E8"],query:{filter:{
-      date_time_filter:{created_at:{start_at:startIso,end_at:endIso}},
-      state_filter:{states:["COMPLETED"]}}},limit:500};
-    if(cursor) bodyObj.cursor=cursor;
-    fetch("/api/proxy",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({url:ordersUrl,method:"POST",body:JSON.stringify(bodyObj)})})
+  // Toast migration (2026-06): now hits the server-side shim /api/toast-orders,
+  // which returns Square-SHAPED orders built from Toast (pagination, voids, and the
+  // tip/total money contract are all handled server-side). Function name kept so
+  // the many callers stay untouched.
+  fetch("/api/toast-orders?start="+encodeURIComponent(startIso)+"&end="+encodeURIComponent(endIso))
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.orders===undefined){onFail();return;}
-      allOrders=allOrders.concat(d.orders);
-      if(d.cursor&&d.orders.length===500){fetchPage(d.cursor);}
-      else{onSuccess(allOrders);}
+      onSuccess(d.orders);
     }).catch(function(){onFail();});
-  }
-  fetchPage(null);
 }
 
 function loadLiveSales(){
@@ -5185,7 +4922,6 @@ async function init(){
   updateDate();
   await loadState();
   await loadRatings();
-  loadSquareToken();
   loadPersistedAverages();
   fhLoadInputs();
   loadYesterdayLabor();
